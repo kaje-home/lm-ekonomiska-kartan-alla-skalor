@@ -10,7 +10,7 @@ En zip-fil som installeras i QGIS, se Snabbstart här nedanför.
 
 1. **Installera.** Ladda ner zip-filen ovan. Öppna QGIS och välj **Insticksprogram → Hantera och installera insticksprogram…**, fliken **Installera från ZIP**. Peka på filen och tryck *Installera insticksprogram*.
 2. **Öppna.** Välj **Insticksprogram → Ekonomiska kartan → Hämta ekonomiska kartan…**, eller knappen med kartbladet i verktygsfältet.
-3. **Område.** Välj *Kartfönstrets utbredning*, ett *Polygonlager* (gärna bara markerade objekt), *Rita i kartan* eller *Rutor ur ett rutnät*: tryck *Bygg bladrutnät* och markera de blad du vill ha, eller skapa ett fast rutnät (se [Bladrutnät och fast rutnät](#bladrutnät-och-fast-rutnät)).
+3. **Område.** Välj *Kartfönstrets utbredning*, ett *Polygonlager* (gärna bara markerade objekt), *Rita i kartan* eller *Rutor ur ett rutnät*: tryck *Bygg bladrutnät* och sedan *Markera i kartan…* för att markera de blad du vill ha, eller skapa ett fast rutnät (se [Bladrutnät och fast rutnät](#bladrutnät-och-fast-rutnät)).
 4. **Utmapp.** Välj en tom mapp **utanför OneDrive**, till exempel `C:\Ekokartan\Uttag1`.
 5. **Hämta.** När det är klart ligger kartan och ett bladlager i en grupp överst i lagerlistan.
 
@@ -58,6 +58,8 @@ I utmappen:
 
 **1:10 000-bladen från 1950-talet i Norrland kan vara nästan rena fotokartor**: flygbilden med lite tryckt kartinnehåll. Ett sådant blad kan vinna över ett yngre 1:20 000-blad med *Äldsta*, eller med *Nyaste* där inget yngre blad finns. Se tryckåret i bladlagret innan du klassar markslag (nedan).
 
+**Samma utmapp igen.** Ett nytt uttag till samma utmapp skriver över det förra. Dialogen tar först bort lagren från det förra uttaget ur projektet. Blad som redan finns, gjorda ur samma källa med samma inställningar, används som de är. Är en fil ändå öppen, till exempel inläst i QGIS, får den nya filen ett reservnamn, som `blad.ny.gpkg`, och loggen säger det.
+
 **Koordinatsystem.** Förvalt är SWEREF 99 TM (EPSG:3006). Väljer du RT 90 2,5 gon V (EPSG:3021), seriens eget system, omsamplas 1:10 000-bladen inte alls. Det är att föredra om du ska klassa pixlar efter färg (se nedan).
 
 ## Bladrutnät och fast rutnät
@@ -81,7 +83,7 @@ Lagret får färg efter skala och tryckår. 1:10 000-rutorna fylls halvgenomskin
 
 **Listningen tar omkring en minut** och sparas med datum, i `ekonomiska_kartan/listning.json` i arkivet om du har ett, annars i QGIS-profilen. Nästa gång används den sparade listningen. Kryssa i *lista FTP:n på nytt* för att hämta en färsk. Datumet står i lagrets namn (*Bladrutnät, listat 2026-11-05*) och i fältet `listad`.
 
-**Markera bladen du vill ha och tryck Hämta.** Samma skal- och utgåveregler gäller som annars. Att markera ett 1:20 000-blad betyder alltså *det här området*, inte *det här bladet*: med *Automatiskt* och *Nyaste* kan det bli ett yngre 1:10 000-blad där ett sådant finns. Vill du ha just 1:20 000-bladet, välj *Bara 1:20 000*.
+**Markera bladen du vill ha och tryck Hämta.** *Markera i kartan…* gör rutnätet till aktivt lager, startar markeringsverktyget och gömmer dialogen tills du trycker Enter eller högerklickar. Samma skal- och utgåveregler gäller som annars. Att markera ett 1:20 000-blad betyder alltså *det här området*, inte *det här bladet*: med *Automatiskt* och *Nyaste* kan det bli ett yngre 1:10 000-blad där ett sådant finns. Vill du ha just 1:20 000-bladet, välj *Bara 1:20 000*.
 
 ### Fast rutnät
 

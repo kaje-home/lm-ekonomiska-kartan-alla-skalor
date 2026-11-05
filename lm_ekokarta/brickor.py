@@ -25,11 +25,12 @@ from typing import Callable
 
 from osgeo import gdal
 
+from .filbyte import byt_in
 from .lm_ekokarta_karna import gdalfart
 from .lm_ekokarta_karna.filer import halvfardig, kontrollera_raster
 
 SKAPA = ["COMPRESS=DEFLATE", "PREDICTOR=2", "TILED=YES", "BIGTIFF=IF_SAFER"]
-SKRIVEN, TOM = "skriven", "ingen kartdata"
+SKRIVEN, TOM, FEL = "skriven", "ingen kartdata", "gick inte att skriva"
 
 
 @dataclass
@@ -60,8 +61,11 @@ def _skar(a, b) -> bool:
 
 def skriv(vrt: str, bladfiler: list[str], brickor: list[Bricka], pixel: float, mapp: str,
           steg: Callable[[str], None] = print, framsteg: Callable[[float], None] = lambda p: None,
-          avbruten: Callable[[], bool] = lambda: False) -> list[Bricka]:
-    """Skriv brickorna till `mapp`/<ruta>.tif. Fyller i status per bricka."""
+          avbruten: Callable[[], bool] = lambda: False,
+          varna: Callable[[str], None] = print) -> list[Bricka]:
+    """Skriv brickorna till `mapp`/<ruta>.tif. Fyller i status per bricka.
+    En bricka som inte gar att skriva far status FEL med orsaken; de ovriga
+    skrivs anda."""
     gdal.UseExceptions()
     os.makedirs(mapp, exist_ok=True)
     vrt_px = gdal.Open(vrt).GetGeoTransform()[1]
@@ -80,8 +84,17 @@ def skriv(vrt: str, bladfiler: list[str], brickor: list[Bricka], pixel: float, m
             b.status, b.andel_karta = TOM, 0.0
             continue
         steg(f"Bricka {n}/{len(brickor)}: {b.ruta}")
-        ut = os.path.join(mapp, b.ruta + ".tif")
-        tmp = halvfardig(ut)
+        try:
+            _en(vrt, b, os.path.join(mapp, b.ruta + ".tif"), pixel, metod, varna)
+        except Exception as e:                  # noqa: BLE001
+            b.status, b.orsak = FEL, str(e)
+            varna(f"Brickan {b.ruta} gick inte att skriva: {e}")
+    return brickor
+
+
+def _en(vrt: str, b: Bricka, ut: str, pixel: float, metod: str, varna) -> None:
+    tmp = halvfardig(ut)
+    try:
         # Utan PAM: annars blir histogrammet en .aux.xml bredvid brickan.
         with gdal.config_options({"GDAL_PAM_ENABLED": "NO"}):
             gdal.Warp(tmp, vrt, format="GTiff", outputBounds=b.utbredning,
@@ -95,10 +108,10 @@ def skriv(vrt: str, bladfiler: list[str], brickor: list[Bricka], pixel: float, m
             d = None
         b.andel_karta = 1.0 - hist[0] / tot if tot else 0.0
         if hist[0] == tot:
-            os.remove(tmp)
             b.status = TOM
-            continue
+            return
         kontrollera_raster(tmp, minsta_byte=1000)
-        os.replace(tmp, ut)
-        b.status, b.fil = SKRIVEN, ut
-    return brickor
+        b.status, b.fil = SKRIVEN, byt_in(tmp, ut, varna)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)

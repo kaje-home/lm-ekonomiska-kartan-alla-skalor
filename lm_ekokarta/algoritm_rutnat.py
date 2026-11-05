@@ -101,7 +101,8 @@ class Bladrutnat(QgsProcessingAlgorithm):
         except blad_alla.Katalogfel as e:
             raise QgsProcessingException(str(e))
         feedback.setProgressText("Skriver bladrutnätet")
-        n10, n20 = rutnat.bladrutnat(lis, self._arkiv, utfil, self._dst)
+        n10, n20, utfil = rutnat.bladrutnat(lis, self._arkiv, utfil, self._dst,
+                                            feedback.pushWarning)
         feedback.pushInfo(f"Listat {lis.datum}: {n10} rutor i 1:10 000, {n20} blad i 1:20 000")
         namn = f"Bladrutnät, listat {lis.datum}"
         kalla = utfil + "|layername=bladrutnat"
@@ -183,7 +184,8 @@ class FastRutnat(QgsProcessingAlgorithm):
         if not utfil.lower().endswith(".gpkg"):
             utfil += ".gpkg"
         try:
-            n = rutnat.fast_rutnat(self._wkt, km * 1000.0, utfil)
+            n, utfil = rutnat.fast_rutnat(self._wkt, km * 1000.0, utfil,
+                                          varna=feedback.pushWarning)
         except ValueError as e:
             raise QgsProcessingException(str(e))
         feedback.pushInfo(f"{n} rutor om {km:g} km")

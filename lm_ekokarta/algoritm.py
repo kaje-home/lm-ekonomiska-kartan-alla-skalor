@@ -243,24 +243,26 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
         for q in s.rader:
             if q.status == rapport.UTELAMNAT:
                 feedback.pushWarning(q.rad)
-        blad = os.path.join(utmapp, "blad.gpkg")
+        # Filerna kan ha fatt reservnamn (filbyte.byt_in) om de gamla var oppna.
+        blad = s.blad_gpkg + "|layername=blad" if s.blad_gpkg else None
         ar = rapport.ar_text(s.ar).replace("-", "–") if s.ar else ""
         if s.vrt:
             context.addLayerToLoadOnCompletion(s.vrt, QgsProcessingContext.LayerDetails(
                 f"Ekonomiska kartan {ar}".strip(), context.project(), "VRT_LAGER"))
-        context.addLayerToLoadOnCompletion(blad + "|layername=blad",
-                                           QgsProcessingContext.LayerDetails(
-                                               "Ekonomiska kartan – blad", context.project(),
-                                               "BLAD"))
-        context.layerToLoadOnCompletionDetails(blad + "|layername=blad").setPostProcessor(
-            stil.efter(stil.blad))
+        if blad:
+            context.addLayerToLoadOnCompletion(blad, QgsProcessingContext.LayerDetails(
+                "Ekonomiska kartan – blad", context.project(), "BLAD"))
+            context.layerToLoadOnCompletionDetails(blad).setPostProcessor(
+                stil.efter(stil.blad))
         skrivna = sum(b.status == brickmod.SKRIVEN for b in s.brickor)
+        tomma = sum(b.status == brickmod.TOM for b in s.brickor)
         if s.brickor:
             feedback.pushInfo(f"Brickor: {skrivna} skrivna till "
                               f"{os.path.join(utmapp, uttag.BRICKMAPP)}, "
-                              f"{len(s.brickor) - skrivna} rutor utan kartdata")
-        return {self.UTMAPP: utmapp, "VRT_LAGER": s.vrt or None,
-                "BLAD": blad + "|layername=blad",
-                "RAPPORT": os.path.join(utmapp, "rapport.txt"),
+                              f"{tomma} rutor utan kartdata"
+                              + (f", {len(s.brickor) - skrivna - tomma} gick inte att skriva"
+                                 if len(s.brickor) - skrivna - tomma else ""))
+        return {self.UTMAPP: utmapp, "VRT_LAGER": s.vrt or None, "BLAD": blad,
+                "RAPPORT": s.rapport_txt or None,
                 "LEVERERADE": len(lev), "UTELAMNADE": len(ut), "AR": ar,
-                "BRICKOR_SKRIVNA": skrivna, "BRICKOR_TOMMA": len(s.brickor) - skrivna}
+                "BRICKOR_SKRIVNA": skrivna, "BRICKOR_TOMMA": tomma}

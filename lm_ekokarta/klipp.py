@@ -15,14 +15,20 @@ from __future__ import annotations
 
 import os
 import xml.etree.ElementTree as ET
+from typing import Callable
 
 from osgeo import gdal, osr
 
+from .filbyte import byt_in, reserver
 from .lm_ekokarta_karna import gdalfart
 from .lm_ekokarta_karna.filer import halvfardig, kontrollera_raster
 
 RT90 = "EPSG:3021"
 SKAPA = ["COMPRESS=DEFLATE", "PREDICTOR=2", "TILED=YES", "BIGTIFF=IF_SAFER"]
+# Kallan och installningarna i varje blad; hoj KLIPP_VERSION nar klippningen
+# andras, sa att gamla blad i en utmapp gors om.
+KALLA_NYCKEL = "LM_EKOKARTA_KALLA"
+KLIPP_VERSION = "1"
 
 
 def rektangel_wkt(minx: float, miny: float, maxx: float, maxy: float) -> str:
@@ -48,11 +54,20 @@ def _som_rgb(ds):
 
 
 def klipp(kalla: str, ruta: tuple[float, float, float, float], utfil: str,
-          dst_crs: str, pixel_m: float) -> str:
+          dst_crs: str, pixel_m: float, varna: Callable[[str], None] = print) -> str:
     """Skriv `kalla` (i RT 90) till `utfil` i `dst_crs`, klippt mot `ruta`
     (minx, miny, maxx, maxy i RT 90), med alfaband. Halvfardig fil tills den
-    ar kontrollerad."""
+    ar kontrollerad. Returnerar namnet filen fick (filbyte.byt_in).
+
+    Finns bladet redan i utmappen, gjort ur samma kalla med samma
+    installningar (KALLA_NYCKEL i filen), anvands det som det ar. Det sparar
+    tid, och framfor allt behover filen inte skrivas om: ett blad som en
+    inlast VRT har last i QGIS ar last tills QGIS startas om."""
     gdal.UseExceptions()
+    nyckel = _nyckel(kalla, ruta, dst_crs, pixel_m)
+    for f in [utfil] + reserver(utfil):
+        if _har_nyckel(f, nyckel):
+            return f
     ds = gdal.Open(kalla)
     src = _som_rgb(ds)
     os.makedirs(os.path.dirname(os.path.abspath(utfil)), exist_ok=True)
@@ -70,12 +85,36 @@ def klipp(kalla: str, ruta: tuple[float, float, float, float], utfil: str,
                   creationOptions=SKAPA, **gdalfart.WARP)
     src = ds = None
     kontrollera_raster(tmp, minsta_byte=10_000)
-    os.replace(tmp, utfil)
-    gdalfart.oversikter(utfil)
-    return utfil
+    # Oversikterna och nyckeln innan filen far sitt namn: efter bytet kan den
+    # vara last.
+    gdalfart.oversikter(tmp)
+    with gdal.config_options({"GDAL_PAM_ENABLED": "NO"}):
+        d = gdal.Open(tmp, gdal.GA_Update)
+        d.SetMetadataItem(KALLA_NYCKEL, nyckel)
+        d = None
+    return byt_in(tmp, utfil, varna)
 
 
-def bygg_vrt(filer: list[str], utfil: str) -> str:
+def _nyckel(kalla: str, ruta, dst_crs: str, pixel_m: float) -> str:
+    st = os.stat(kalla)
+    return (f"{KLIPP_VERSION}|{os.path.normcase(os.path.abspath(kalla))}|{st.st_size}|"
+            f"{int(st.st_mtime)}|{','.join(f'{v:.3f}' for v in ruta)}|{dst_crs}|{pixel_m:g}")
+
+
+def _har_nyckel(fil: str, nyckel: str) -> bool:
+    if not os.path.exists(fil):
+        return False
+    try:
+        with gdal.config_options({"GDAL_PAM_ENABLED": "NO"}):
+            d = gdal.Open(fil)
+            ok = d.GetMetadataItem(KALLA_NYCKEL) == nyckel and d.RasterCount == 4
+            d = None
+        return ok
+    except RuntimeError:
+        return False
+
+
+def bygg_vrt(filer: list[str], utfil: str, varna: Callable[[str], None] = print) -> str:
     """VRT over bladen i den ordning de ges -- det sista ritas overst.
 
     gdalbuildvrt later en kalla skriva over allt som kom fore inom sin
@@ -98,5 +137,4 @@ def bygg_vrt(filer: list[str], utfil: str) -> str:
                 ET.SubElement(kalla, "UseMaskBand").text = "true"
     trad.write(tmp, encoding="UTF-8", xml_declaration=False)
     kontrollera_raster(tmp, minsta_byte=100)
-    os.replace(tmp, utfil)
-    return utfil
+    return byt_in(tmp, utfil, varna)

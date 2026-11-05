@@ -9,6 +9,7 @@ nar det ar klart.
 from __future__ import annotations
 
 import os
+import re
 
 from qgis.core import (Qgis, QgsApplication, QgsCoordinateReferenceSystem,
                        QgsProcessingAlgRunnerTask, QgsProcessingContext,
@@ -25,7 +26,27 @@ from qgis.PyQt.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog,
 
 from . import stil
 from .algoritm import SKALOR, UTGAVOR
+from .markera import MarkeraIKartan
 from .rita import RitaYta
+
+_EGNA = re.compile(r"(blad(\.ny\d*)?\.gpkg|ekonomiska_kartan_.*\.vrt)$")
+
+
+def egna_lager(utmapp: str) -> list:
+    """Projektets lager ur pluginets egna filer i `utmapp`: bladlagret, VRT:n,
+    bladen i blad/ och brickorna i brickor/."""
+    rot = os.path.normcase(os.path.abspath(utmapp))
+    ut = []
+    for lag in QgsProject.instance().mapLayers().values():
+        fil = lag.source().split("|")[0]
+        if not os.path.isabs(fil):
+            continue
+        mapp, namn = os.path.split(os.path.normcase(os.path.abspath(fil)))
+        if (mapp == rot and _EGNA.match(namn)) or \
+                (os.path.dirname(mapp) == rot and os.path.basename(mapp) in ("blad", "brickor")):
+            ut.append(lag)
+    return ut
+
 
 ALG = "lmeko:hamta_ekonomiska_kartan"
 ALG_BLADRUTNAT = "lmeko:bladrutnat"
@@ -69,6 +90,7 @@ class HamtaDialog(QDialog):
         self.r_uppgift = None          # bladrutnatet, en egen uppgift
         self.r_context = None
         self.r_aterkoppling = None
+        self.markering = None
         self.utmapp_senast = ""
         s = QgsSettings()
 
@@ -121,6 +143,18 @@ class HamtaDialog(QDialog):
         self.bara_markerade_rutor.setChecked(True)
         rad.addWidget(self.bara_markerade_rutor)
         gl.addLayout(rad)
+        rad = QHBoxLayout()
+        rad.addSpacing(24)
+        self.k_markera = QPushButton("Markera i kartan…")
+        self.k_markera.setToolTip(
+            "Gör rutnätet aktivt och startar QGIS markeringsverktyg. Enter eller högerklick "
+            "tar dig tillbaka hit.")
+        self.k_markera.clicked.connect(self._markera)
+        rad.addWidget(self.k_markera)
+        self.l_markerade = QLabel("")
+        rad.addWidget(self.l_markerade, 1)
+        gl.addLayout(rad)
+        self.rutlager.layerChanged.connect(self._visa_markerade)
         rad = QHBoxLayout()
         rad.addSpacing(24)
         self.k_bladrutnat = QPushButton("Bygg bladrutnät")
@@ -251,6 +285,31 @@ class HamtaDialog(QDialog):
         self.verktyg = None
         self.show()
         self.raise_()
+
+    # --- Markera rutor i kartan ---------------------------------------------------
+    def _markera(self):
+        lager = self.rutlager.currentLayer()
+        if lager is None:
+            self.resultat.setText("Välj ett rutnät, eller bygg bladrutnätet först.")
+            return
+        self.r_rutnat.setChecked(True)
+        self.bara_markerade_rutor.setChecked(True)
+        self.markering = MarkeraIKartan(self.iface, lager)
+        self.markering.klar.connect(self._markerat)
+        self.hide()
+        self.markering.starta()
+
+    def _markerat(self):
+        self.markering = None
+        self._visa_markerade()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _visa_markerade(self, *_):
+        lager = self.rutlager.currentLayer()
+        n = lager.selectedFeatureCount() if lager is not None else 0
+        self.l_markerade.setText(f"{n} rutor markerade" if lager is not None else "")
 
     # --- Rutnat -----------------------------------------------------------------
     def _rutnat_val(self, *_):
@@ -402,6 +461,7 @@ class HamtaDialog(QDialog):
         self.framsteg.setValue(0)
         self.k_mapp.setEnabled(False)
         self.utmapp_senast = p["UTMAPP"]
+        self._ta_bort_forra(p)
         self.context = QgsProcessingContext()
         self.context.setProject(QgsProject.instance())
         self.aterkoppling = _Aterkoppling()
@@ -412,6 +472,28 @@ class HamtaDialog(QDialog):
         self.k_kor.setEnabled(False)
         self.k_avbryt.setEnabled(True)
         QgsApplication.taskManager().addTask(self.uppgift)
+
+    def _ta_bort_forra(self, p: dict) -> None:
+        """Lagren fran ett tidigare uttag i samma utmapp ut ur projektet, sa att
+        filerna inte ar lasta nar de skrivs om. Det nya uttaget laggs in nar
+        det ar klart. Omradeslagret ror vi inte, aven om det ar ett sadant
+        lager; da far den nya filen ett reservnamn (filbyte.byt_in)."""
+        omrade = p.get("LAGER")
+        if isinstance(omrade, QgsProcessingFeatureSourceDefinition):
+            omrade = omrade.source.staticValue()
+        prj = QgsProject.instance()
+        gamla = [lag.id() for lag in egna_lager(p["UTMAPP"]) if lag.id() != omrade]
+        if not gamla:
+            return
+        prj.removeMapLayers(gamla)
+        rot = prj.layerTreeRoot()
+        for grupp in rot.findGroups():
+            if grupp.name().startswith("Ekonomiska kartan") and not grupp.findLayers():
+                rot.removeChildNode(grupp)
+        self.logg.appendPlainText(
+            f"Tog bort {len(gamla)} lager från ett tidigare uttag i samma utmapp ur "
+            f"projektet, så att filerna kan skrivas om. Det nya uttaget läggs in när det "
+            f"är klart.")
 
     def _avbryt(self):
         if self.aterkoppling is not None:
@@ -452,6 +534,8 @@ class HamtaDialog(QDialog):
         for a in (self.aterkoppling, self.r_aterkoppling):
             if a is not None:
                 a.cancel()
+        if self.markering is not None:
+            self.markering.avsluta()
         if self.verktyg is not None:
             self.iface.mapCanvas().unsetMapTool(self.verktyg)
             self.verktyg = None

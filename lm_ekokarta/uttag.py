@@ -35,6 +35,7 @@ from . import brickor as brickmod
 from . import klipp, rapport
 from .lm_ekokarta_karna import blad_alla, cache_20k, rutnat_20k
 from .lm_ekokarta_karna.blad import BLAD_20K_M
+from .lm_ekokarta_karna.filer import halvfardig
 from .lm_ekokarta_karna.ftp import hamta_fil
 from .rapport import LEVERERAT, SAKNAS, UTELAMNAT, Bladrad, Sammanfattning
 
@@ -155,28 +156,46 @@ def kor(rutor: list[tuple[float, float]], utmapp: str, arkiv: str, dst_crs: str,
         if vrt and filer:
             r.steg("Bygger VRT")
             namn = f"ekonomiska_kartan_{rapport.ar_text(s.ar)}.vrt"
-            s.vrt = klipp.bygg_vrt(filer, os.path.join(utmapp, namn))
+            try:
+                s.vrt = klipp.bygg_vrt(filer, os.path.join(utmapp, namn), r.varning)
+            except Exception as e:              # noqa: BLE001
+                # Bladen ar levererade; utan VRT gar de att lasa in var for sig.
+                r.varning(f"VRT:n gick inte att bygga ({e}). Bladen finns i blad/.")
 
         # --- Brickor ----------------------------------------------------------
         if brickor:
             # Brickorna skars ur en VRT aven nar ingen VRT ska levereras.
-            kalla = s.vrt or (klipp.bygg_vrt(filer, os.path.join(utmapp, "_brickor.vrt"))
-                              if filer else "")
+            # Den tillfalliga VRT:n har ett eget namn per korning: den kan
+            # inte vara inlast nagonstans.
+            kalla = s.vrt or (klipp.bygg_vrt(filer, halvfardig(
+                os.path.join(utmapp, "_brickor.vrt")), r.varning) if filer else "")
             if kalla:
                 r.steg(f"Skär ut {len(brickor)} brickor")
                 brickmod.skriv(kalla, filer, brickor, brick_pixel,
                                os.path.join(utmapp, BRICKMAPP), r.steg,
-                               lambda p: r.framsteg(90 + 0.08 * p), r.avbruten)
+                               lambda p: r.framsteg(90 + 0.08 * p), r.avbruten, r.varning)
                 if not s.vrt:
-                    os.remove(kalla)
+                    try:
+                        os.remove(kalla)
+                    except OSError:
+                        pass
             else:
                 for b in brickor:
                     b.status, b.andel_karta = brickmod.TOM, 0.0
             s.brickor, s.brick_pixel = brickor, brick_pixel
             _kolla(r)
+        # Rapporten far aldrig falla ett uttag dar bladen redan ar levererade.
         r.steg("Skriver rapporten")
-        rapport.skriv_gpkg(s, os.path.join(utmapp, "blad.gpkg"))
-        rapport.skriv_text(s, os.path.join(utmapp, "rapport.txt"))
+        try:
+            s.blad_gpkg = rapport.skriv_gpkg(s, os.path.join(utmapp, "blad.gpkg"), r.varning)
+        except Exception as e:                  # noqa: BLE001
+            r.varning(f"Bladlagret blad.gpkg gick inte att skriva ({e}). Bladen och "
+                      f"rapport.txt finns ändå.")
+        try:
+            s.rapport_txt = rapport.skriv_text(s, os.path.join(utmapp, "rapport.txt"),
+                                               r.varning)
+        except Exception as e:                  # noqa: BLE001
+            r.varning(f"rapport.txt gick inte att skriva ({e}).")
         for f in s.fel:
             r.varning(f)
         r.framsteg(100)
@@ -295,8 +314,9 @@ def _blad_10k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor) -> Bladra
         if not cache_20k.duger(tif):
             r.steg(f"Hämtar {b.namn}")
             hamta_fil(b.url("tif"), tif)
-        utfil = os.path.join(bladmapp, _filnamn(b.ruta, b.ar, b.utgava, "10k"))
-        klipp.klipp(tif, rad.ruta, utfil, dst_crs, 1.0)
+        utfil = klipp.klipp(tif, rad.ruta,
+                            os.path.join(bladmapp, _filnamn(b.ruta, b.ar, b.utgava, "10k")),
+                            dst_crs, 1.0, r.varning)
     except Exception as e:                      # noqa: BLE001
         return _utelamnat(rad, f"gick inte att hämta eller skriva ({e})")
     rad.status, rad.metod, rad.fil = LEVERERAT, "världsfil", utfil
@@ -335,8 +355,9 @@ def _blad_20k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor) -> Bladra
         rad.status, rad.orsak = UTELAMNAT, d.get("orsak") or "klarade inte spärrarna"
         return rad
     try:
-        utfil = os.path.join(bladmapp, _filnamn(b.katalog, b.ar, rad.utgava, "20k"))
-        klipp.klipp(geo, ruta, utfil, dst_crs, rutnat_20k.PIXEL_M)
+        utfil = klipp.klipp(geo, ruta,
+                            os.path.join(bladmapp, _filnamn(b.katalog, b.ar, rad.utgava, "20k")),
+                            dst_crs, rutnat_20k.PIXEL_M, r.varning)
     except Exception as e:                      # noqa: BLE001
         return _utelamnat(rad, f"georefererat men gick inte att skriva ({e})")
     rad.status, rad.fil = LEVERERAT, utfil

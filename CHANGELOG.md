@@ -1,5 +1,14 @@
 # Ändringar
 
+## 0.2.1 (2026-11-05)
+
+- **Ett uttag kraschar inte längre för att filerna från förra körningen är inlästa i QGIS.** I 0.2.0 kraschade rapporten, efter att allt hämtats, om `blad.gpkg` var inläst. Nu skrivs allt pluginet gör (blad, VRT, brickor, bladlager, rapport, bladrutnät, fast rutnät) först till en temporär fil, som sedan byts in. Är den gamla filen låst får den nya ett reservnamn, till exempel `blad.ny.gpkg`, och loggen säger det. Nästa gång filen går att skriva tas reservfilerna bort.
+- Dialogen tar bort lagren från ett tidigare uttag i samma utmapp ur projektet innan den börjar. Det nya uttaget läggs in när det är klart.
+- Ett blad som redan finns i utmappen, gjort ur samma källa med samma inställningar, används som det är. En VRT som är inläst i QGIS låser sina blad tills QGIS startas om, så de går inte att skriva om.
+- En bricka eller en VRT som inte går att skriva stoppar inte uttaget. Brickan nämns i rapporten.
+- **Markera i kartan…** vid *Rutor ur ett rutnät*. Knappen gör rutnätet till aktivt lager och startar markeringsverktyget. Dialogen göms tills du trycker Enter eller högerklickar.
+- Provat i QGIS 3.44 och 4.2, och i QGIS 3.44 med lagren från förra körningen inlästa.
+
 ## 0.2.0 (2026-11-05)
 
 - **Bladrutnät:** ett översiktslager med alla blad i båda skalorna ur FTP-listningen, med år, antal utgåvor, om bladet finns i arkivet och listningens datum. Det färgas efter skala och tryckår. Listningen sparas med datum och listas om bara på begäran. Finns som knapp i dialogen och som algoritmen `lmeko:bladrutnat`.

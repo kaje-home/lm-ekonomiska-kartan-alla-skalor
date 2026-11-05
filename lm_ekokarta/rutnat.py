@@ -22,6 +22,7 @@ from collections import defaultdict
 from osgeo import ogr, osr
 
 from .lm_ekokarta_karna import rutnat_20k
+from .filbyte import byt_in
 from .lm_ekokarta_karna.blad import BLAD_20K_M
 from .lm_ekokarta_karna.filer import halvfardig
 from .listning import Listning
@@ -63,11 +64,10 @@ def _ny_gpkg(utfil: str, lagernamn: str, crs: str, falt):
     return ds, lager, tmp
 
 
-def _klar(tmp: str, utfil: str) -> None:
-    """Den halvfardiga filen pa plats. Anroparen har stangt den (ds = None)."""
-    if os.path.exists(utfil):
-        os.remove(utfil)
-    os.replace(tmp, utfil)
+def _klar(tmp: str, utfil: str, varna) -> str:
+    """Den halvfardiga filen pa plats, eller under ett reservnamn om den
+    gamla ar oppen. Anroparen har stangt den (ds = None)."""
+    return byt_in(tmp, utfil, varna)
 
 
 # --- Bladrutnatet ---------------------------------------------------------------
@@ -109,8 +109,10 @@ def _cache_20k(arkiv: str, b) -> tuple[int | None, str]:
     return 0, "nej"
 
 
-def bladrutnat(lis: Listning, arkiv: str, utfil: str, dst_crs: str = SWEREF) -> tuple[int, int]:
-    """Bladrutorna i `dst_crs`. (antal 1:10 000-rutor, antal 1:20 000-rutor)."""
+def bladrutnat(lis: Listning, arkiv: str, utfil: str, dst_crs: str = SWEREF,
+               varna=print) -> tuple[int, int, str]:
+    """Bladrutorna i `dst_crs`. (antal 1:10 000-rutor, antal 1:20 000-rutor,
+    filen)."""
     rt90, mal = _srs("EPSG:3021"), _srs(dst_crs)
     ct = osr.CoordinateTransformation(rt90, mal)
     ds, lager, tmp = _ny_gpkg(utfil, "bladrutnat", dst_crs, _BLADFALT)
@@ -158,8 +160,7 @@ def bladrutnat(lis: Listning, arkiv: str, utfil: str, dst_crs: str = SWEREF) -> 
               _cache_20k(arkiv, nyast), nyast.katalog)
     lager.CommitTransaction()
     lager = ds = None
-    _klar(tmp, utfil)
-    return len(per_ruta), len(per_omrade)
+    return len(per_ruta), len(per_omrade), _klar(tmp, utfil, varna)
 
 
 # --- Fast rutnat ------------------------------------------------------------------
@@ -173,9 +174,10 @@ def rutnamn(minx: float, miny: float) -> str:
     return f"N{round(miny)}_E{round(minx)}"
 
 
-def fast_rutnat(yta_wkt: str, storlek_m: float, utfil: str, crs: str = SWEREF) -> int:
+def fast_rutnat(yta_wkt: str, storlek_m: float, utfil: str, crs: str = SWEREF,
+                varna=print) -> tuple[int, str]:
     """Rutor om `storlek_m` med horn pa jamna multipler av storleken, de som
-    `yta_wkt` (i `crs`) beror. Antalet rutor."""
+    `yta_wkt` (i `crs`) beror. (antal rutor, filen)."""
     if storlek_m <= 0:
         raise ValueError("rutstorleken måste vara större än noll")
     yta = ogr.CreateGeometryFromWkt(yta_wkt)
@@ -211,5 +213,4 @@ def fast_rutnat(yta_wkt: str, storlek_m: float, utfil: str, crs: str = SWEREF) -
             n += 1
     lager.CommitTransaction()
     lager = ds = None
-    _klar(tmp, utfil)
-    return n
+    return n, _klar(tmp, utfil, varna)

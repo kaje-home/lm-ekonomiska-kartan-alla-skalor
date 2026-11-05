@@ -9,9 +9,11 @@ from __future__ import annotations
 import datetime
 import os
 from dataclasses import dataclass, field
+from typing import Callable
 
 from osgeo import ogr, osr
 
+from .filbyte import byt_in
 from .lm_ekokarta_karna.filer import halvfardig
 
 LEVERERAT, UTELAMNAT, SAKNAS = "levererat", "utelämnat", "saknas"
@@ -50,6 +52,8 @@ class Sammanfattning:
     overlapp: list[str] = field(default_factory=list)   # rutor med bada skalorna
     brickor: list = field(default_factory=list)         # brickor.Bricka
     brick_pixel: float = 0.0
+    blad_gpkg: str = ""                                 # namnen filerna fick
+    rapport_txt: str = ""
 
     @property
     def ar(self) -> list[int]:
@@ -74,8 +78,9 @@ _BRICKFALT = [("ruta", ogr.OFTString), ("status", ogr.OFTString),
               ("andel_karta", ogr.OFTReal), ("fil", ogr.OFTString)]
 
 
-def skriv_gpkg(s: Sammanfattning, utfil: str) -> str:
-    """Bladrutorna i malets koordinatsystem, med ett falt per matt."""
+def skriv_gpkg(s: Sammanfattning, utfil: str, varna: Callable[[str], None] = print) -> str:
+    """Bladrutorna i malets koordinatsystem, med ett falt per matt.
+    Returnerar namnet filen fick (filbyte.byt_in)."""
     ogr.UseExceptions()
     rt90 = osr.SpatialReference()
     rt90.ImportFromEPSG(3021)
@@ -125,14 +130,12 @@ def skriv_gpkg(s: Sammanfattning, utfil: str) -> str:
             f.SetGeometry(ogr.CreateGeometryFromWkt(
                 f"POLYGON(({minx} {miny},{maxx} {miny},{maxx} {maxy},{minx} {maxy},{minx} {miny}))"))
             bl.CreateFeature(f)
-    ds = None
-    if os.path.exists(utfil):
-        os.remove(utfil)
-    os.replace(tmp, utfil)
-    return utfil
+        bl = None
+    lager = ds = None
+    return byt_in(tmp, utfil, varna)
 
 
-def skriv_text(s: Sammanfattning, utfil: str) -> str:
+def skriv_text(s: Sammanfattning, utfil: str, varna: Callable[[str], None] = print) -> str:
     lev = [r for r in s.rader if r.status == LEVERERAT]
     ut = [r for r in s.rader if r.status == UTELAMNAT]
     saknas = [r for r in s.rader if r.status == SAKNAS]
@@ -170,13 +173,23 @@ def skriv_text(s: Sammanfattning, utfil: str) -> str:
         rader += [f"  {t}" for t in s.overlapp] + [""]
     if s.brickor:
         skrivna = [b for b in s.brickor if b.status == "skriven"]
-        tomma = [b for b in s.brickor if b.status != "skriven"]
+        tomma = [b for b in s.brickor if b.status == "ingen kartdata"]
+        fel = [b for b in s.brickor if b.status == "gick inte att skriva"]
+        namnbyte = [b for b in skrivna if b.fil and
+                    os.path.splitext(os.path.basename(b.fil))[0] != b.ruta]
         delvis = [b for b in skrivna if (b.andel_karta or 0) < 0.9995]
         rader.append(f"Brickor: {len(skrivna)} av {len(s.brickor)} rutor skrivna till brickor/, "
                      f"{s.brick_pixel:g} m pixlar, hörnen på jämna multipler av pixelstorleken.")
         if tomma:
             rader.append(f"  Utan kartdata, hoppades över ({len(tomma)}): "
                          + ", ".join(b.ruta for b in tomma))
+        if fel:
+            rader.append(f"  Gick inte att skriva ({len(fel)}): "
+                         + "; ".join(f"{b.ruta} ({b.orsak})" for b in fel))
+        if namnbyte:
+            rader.append(f"  Under ett nytt namn, eftersom den gamla filen var öppen "
+                         f"({len(namnbyte)}): "
+                         + ", ".join(os.path.basename(b.fil) for b in namnbyte))
         if delvis:
             rader.append(f"  Delvis utan karta (alfabandet är maskning) ({len(delvis)}): "
                          + ", ".join(f"{b.ruta} {100 * b.andel_karta:.0f} %" for b in delvis))
@@ -186,5 +199,4 @@ def skriv_text(s: Sammanfattning, utfil: str) -> str:
     tmp = halvfardig(utfil)
     with open(tmp, "w", encoding="utf-8") as f:
         f.write("\n".join(rader) + "\n")
-    os.replace(tmp, utfil)
-    return utfil
+    return byt_in(tmp, utfil, varna)

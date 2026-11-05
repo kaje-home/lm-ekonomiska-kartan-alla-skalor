@@ -3,7 +3,7 @@ name=LM Ekonomiska kartan – alla skalor
 qgisMinimumVersion=3.40
 qgisMaximumVersion=4.99
 description=Fristående tillägg (inte från Lantmäteriet): ekonomiska kartan över ett område som georefererade GeoTIFF-blad, i 1:10 000 eller 1:20 000 efter vad som finns. 1:20 000-bladen georefereras automatiskt mot kartans eget rutnät.
-version=0.2.0
+version=0.2.1
 author=Karl-Johan Olofsson
 email=kaje@bahnhof.se
 about=Fristående tillägg, inte från Lantmäteriet. Hämtar Lantmäteriets ekonomiska karta (1942–1988, öppna data, CC0) över ett område och levererar georefererade blad utan att du behöver veta skala eller källa.
@@ -24,7 +24,10 @@ about=Fristående tillägg, inte från Lantmäteriet. Hämtar Lantmäteriets eko
 tracker=https://github.com/kaje-home/lm-ekonomiska-kartan-alla-skalor/issues
 repository=https://github.com/kaje-home/lm-ekonomiska-kartan-alla-skalor
 homepage=https://github.com/kaje-home/lm-ekonomiska-kartan-alla-skalor
-changelog=0.2.0 (2026-11-05)
+changelog=0.2.1 (2026-11-05)
+    - Kraschar inte längre när filerna från förra körningen är inlästa i QGIS: låsta filer får ett reservnamn (blad.ny.gpkg), och loggen säger det.
+    - Knappen Markera i kartan… vid rutnätsvalet.
+    0.2.0 (2026-11-05)
     - Bladrutnät för båda skalorna, fast rutnät och brickor (en GeoTIFF per ruta).
     - Rutor ur ett rutnät som fjärde områdesval i dialogen.
     0.1.0 (2026-11-05)
