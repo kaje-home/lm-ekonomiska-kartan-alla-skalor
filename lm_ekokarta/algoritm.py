@@ -243,7 +243,8 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
                           index)
         except uttag.Avbrutet:
             return {}
-        lev = [q for q in s.rader if q.status == rapport.LEVERERAT]
+        # En reservdel ar en del av ett blad, inte ett blad till.
+        lev = [q for q in s.rader if q.status == rapport.LEVERERAT and not q.reserv]
         ut = [q for q in s.rader if q.status == rapport.UTELAMNAT]
         for q in s.rader:
             if q.status == rapport.UTELAMNAT:

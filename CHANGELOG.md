@@ -1,5 +1,11 @@
 # Ändringar
 
+## 0.2.3 (2026-11-05)
+
+- **Delbladens del utanför 1:20 000 är reserv.** I 0.2.2 klipptes den bort helt, och en ruta som 19i8a, där inget 1:10 000-blad finns, blev tom. Nu används den delen i rutor som inget annat blad täcker, och aldrig över ett 1:10 000-blad. Den klipps mot de rutorna, blir en egen fil (`…_20k_reserv.tif`), ligger underst i VRT:n och är markerad som *reserv (utanför 1:20 000-delen enligt indexet)* i rapporten och i bladlagret (fältet `reserv`). I hela landet gäller det 11 rutor i läget *Automatiskt*: 19i8a och tio rutor där 1:10 000-bladets världsfil vägras.
+- Provat: de 118 bladen vid seriegränsen genom uttaget med bara 1:20 000. Huvuddel och reserv ger tillsammans exakt det georefererade bladet, och reserv finns bara på delbladen. Proven i `kontroll/` i QGIS 3.44 och 4.2.
+- 0.2.2 gavs inte ut; ändringarna nedan kommer med i 0.2.3.
+
 ## 0.2.2 (2026-11-05)
 
 - **Blad mot seriegränsen.** Ett 1:20 000-blad som saknar kilometerstreck på kanten mot 1:10 000-området, och därför inte klarar kravet på streck, provas en gång till utan de kanterna: minst 16 streck på de övriga och samma 6 m-gräns. Rapporten säger vilken kant det gäller. Mullberget (J141-17F0-1e-f73) klarar sig nu med 5,7 m (95 %). Ny metodversion "2026-11-05 kant 6 m, seriegräns", så arkiverade 1:20 000-blad georefereras om en gång; de andra bladen blir som förut.

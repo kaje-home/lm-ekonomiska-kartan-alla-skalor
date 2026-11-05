@@ -3,7 +3,7 @@ name=LM Ekonomiska kartan – alla skalor
 qgisMinimumVersion=3.40
 qgisMaximumVersion=4.99
 description=Fristående tillägg (inte från Lantmäteriet): ekonomiska kartan över ett område som georefererade GeoTIFF-blad, i 1:10 000 eller 1:20 000 efter vad som finns. 1:20 000-bladen georefereras automatiskt mot kartans eget rutnät.
-version=0.2.2
+version=0.2.3
 author=Karl-Johan Olofsson
 email=kaje@bahnhof.se
 about=Fristående tillägg, inte från Lantmäteriet. Hämtar Lantmäteriets ekonomiska karta (1942–1988, öppna data, CC0) över ett område och levererar georefererade blad utan att du behöver veta skala eller källa.
@@ -24,7 +24,9 @@ about=Fristående tillägg, inte från Lantmäteriet. Hämtar Lantmäteriets eko
 tracker=https://github.com/kaje-home/lm-ekonomiska-kartan-alla-skalor/issues
 repository=https://github.com/kaje-home/lm-ekonomiska-kartan-alla-skalor
 homepage=https://github.com/kaje-home/lm-ekonomiska-kartan-alla-skalor
-changelog=0.2.2 (2026-11-05)
+changelog=0.2.3 (2026-11-05)
+    - Delbladens del utanför 1:20 000 används som reserv där inget annat blad täcker, aldrig över ett 1:10 000-blad.
+    0.2.2 (2026-11-05, inte utgiven)
     - 1:20 000-blad mot seriegränsen klarar sig utan kilometerstreck på kanten mot 1:10 000-området (t.ex. Mullberget).
     - Bladnamn och delblad ur Lantmäteriets index; delblad klipps mot den del som är 1:20 000.
     0.2.1 (2026-11-05)

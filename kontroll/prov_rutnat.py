@@ -17,6 +17,9 @@ Kraven:
   rutan ar inte 1:20 000 enligt indexet
 - Mullberget (delblad): bara den vastra halften, med bladnamn, gransida och
   delblad i rapporten
+- reserv: Sveg automatiskt har ingen; bara 1:20 000 over Sveg ger 16e2h som
+  reserv ur Halvar-Jonsberg, egen fil och rad; rutan 19i8a (inget
+  1:10 000-blad) far reserv ur J141-19I8-9a-b67 aven automatiskt
 - fast rutnat: tva korningar over grannomraden ger samma rutor och namn
 - Sveg, bara 1:10 000: 4 brickor, 5 rutor utan kartdata
 - Sveg automatiskt och Stromsund med 2 m: 9 brickor vardera
@@ -211,6 +214,47 @@ granska_brickor("sveg_10k", 1.0, 2500)
 res = hamta("sveg_auto", g1)
 u.krav((res["BRICKOR_SKRIVNA"], res["BRICKOR_TOMMA"]) == (9, 0), "Sveg automatiskt: 9 brickor")
 granska_brickor("sveg_auto", 1.0, 2500)
+bl = lager(res["BLAD"], "sveg_auto_blad")
+u.krav(not [q for q in bl.getFeatures() if q["reserv"] == 1],
+       "Sveg automatiskt: ingen reserv, 16e2h har sitt 1:10 000-blad")
+
+
+def reservrader(namn: str, res: dict) -> tuple[list, str]:
+    v = lager(res["BLAD"], f"{namn}_blad")
+    with open(os.path.join(UT, namn, "rapport.txt"), encoding="utf-8") as f_:
+        return [q for q in v.getFeatures() if q["reserv"] == 1], f_.read()
+
+
+RESERV = "reserv (utanför 1:20 000-delen enligt indexet)"
+
+# 5b. Sveg, bara 1:20 000: Halvar-Jonsberg, och 16e2h som reserv ur samma
+# blad, eftersom inget annat blad tacker rutan.
+markera(br, SVEG)
+res = hamta("sveg_20k", br, SKALA=2, BRICKOR=False)
+res_rader, rapport = reservrader("sveg_20k", res)
+filer = sorted(os.listdir(os.path.join(UT, "sveg_20k", "blad")))
+u.krav(res["LEVERERADE"] == 1 and len(res_rader) == 1
+       and abs(res_rader[0].geometry().area() / 25e6 - 1) < 0.01
+       and res_rader[0]["anm"].startswith(RESERV)
+       and "Reservdelar (delblad utanför 1:20 000-delen, där inget annat blad finns): 1" in rapport
+       and f"(1977), {RESERV}: " in rapport and "Reserven täcker rutan 16e2h" in rapport
+       and filer == ["J141-16E2-3g-h77_1977_20k.tif", "J141-16E2-3g-h77_1977_20k_reserv.tif"],
+       f"bara 1:20 000: 16e2h som reserv, egen fil och egen rad ({filer})")
+vrt = gdal.Open(res["VRT_LAGER"])
+bredd = vrt.RasterXSize * vrt.GetGeoTransform()[1]
+vrt = None
+u.krav(abs(bredd / 10000 - 1) < 0.05, f"bara 1:20 000: VRT:n tacker hela bladet ({bredd:.0f} m)")
+
+# 5c. Rutan 19i8a har inget 1:10 000-blad: reserv ur J141-19I8-9a-b67 aven
+# i det automatiska laget.
+res = processing.run("lmeko:hamta_ekonomiska_kartan", {
+    "UTBREDNING": "1600500,1604500,7040500,7044500 [EPSG:3021]", "SKALA": 0, "UTGAVA": 0,
+    "CRS": "EPSG:3006", "ARKIV": ARKIV, "VRT": True, "UTMAPP": os.path.join(UT, "reserv_19i8a")})
+res_rader, rapport = reservrader("reserv_19i8a", res)
+u.krav(res["LEVERERADE"] == 0 and len(res_rader) == 1 and res_rader[0]["blad"] == "J141-19I8-9a-b67"
+       and "Rutor utan karta: 0" in rapport and "Reserven täcker rutan 19i8a" in rapport,
+       f"19i8a: reserv ur J141-19I8-9a-b67, ingen ruta utan karta "
+       f"({len(res_rader)} reservrader, levererade {res['LEVERERADE']})")
 
 # 6. Stromsund, 2 m pixlar.
 markera(br, "\"blad\" = 'J141-20F6-7g-h74'")

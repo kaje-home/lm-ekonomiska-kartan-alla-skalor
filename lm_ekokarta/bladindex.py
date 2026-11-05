@@ -105,12 +105,23 @@ class Index20k:
         """1:20 000-delen av ett delblad som polygon i RT 90; None for ett helt blad."""
         if not self.ar_delblad(b):
             return None
-        u = ogr.Geometry(ogr.wkbMultiPolygon)
-        for x, y in self.celler(b):
-            u.AddGeometry(ogr.CreateGeometryFromWkt(
-                f"POLYGON(({x} {y - BLAD_M},{x + BLAD_M} {y - BLAD_M},{x + BLAD_M} {y},"
-                f"{x} {y},{x} {y - BLAD_M}))"))
-        return u.UnionCascaded().ExportToWkt()
+        return celler_wkt(self.celler(b))
+
+    def reservceller(self, b: Blad20k) -> list[tuple[float, float]]:
+        """Rutorna i ett delblad som inte ar 1:20 000 enligt indexet. Kartan ar
+        oftast tryckt dar ocksa; uttaget anvander den som reserv."""
+        egna = set(self.celler(b))
+        return [q for q in _celler_i_bladet(b.minx, b.maxy) if q not in egna]
+
+
+def celler_wkt(celler) -> str:
+    """5 km-rutorna (minx, maxy i RT 90) som en polygon (WKT)."""
+    u = ogr.Geometry(ogr.wkbMultiPolygon)
+    for x, y in celler:
+        u.AddGeometry(ogr.CreateGeometryFromWkt(
+            f"POLYGON(({x} {y - BLAD_M},{x + BLAD_M} {y - BLAD_M},{x + BLAD_M} {y},"
+            f"{x} {y},{x} {y - BLAD_M}))"))
+    return u.UnionCascaded().ExportToWkt()
 
 
 def sokvag(mapp: str) -> str:

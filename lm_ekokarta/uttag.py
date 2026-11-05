@@ -15,7 +15,8 @@ utan QGIS. Gangen:
 4. Varje levererat blad klipps mot sin ruta i malets koordinatsystem. Ett
    1:20 000-blad vid seriegransen som bara delvis ar 1:20 000 (enligt
    Lantmateriets index, bladindex.py) tar bara de rutorna och klipps mot den
-   delen; resten hor till 1:10 000-serien.
+   delen; resten hor till 1:10 000-serien. Den resten tas som reserv, i en
+   egen fil, bara i rutor som inget levererat blad tacker.
 5. VRT over alla, i samma ordning i alla lagen, aven "bada": det yngsta
    (eller aldsta) bladet overst, 1:10 000 vid samma ar.
 6. Brickor, om de bestallts: en GeoTIFF per ruta ur mosaiken (brickor.py).
@@ -54,6 +55,7 @@ UTGAVA_TEXT = {"nyaste": "nyaste", "aldsta": "äldsta", "alla": "alla utgåvor"}
 
 ANM_KANT = ("lämna-en-utanför underskattar felet; prövat mot blad med heldraget "
             "rutnät är det verkliga felet omkring 2 m större")
+RESERV = "reserv (utanför 1:20 000-delen enligt indexet)"
 
 
 class Avbrutet(Exception):
@@ -101,7 +103,9 @@ def kor(rutor: list[tuple[float, float]], utmapp: str, arkiv: str, dst_crs: str,
             if skala in ("auto", "10k", "bada") else []
         b20 = _sok(r, s, "1:20 000", blad_alla.hitta_20k, rutor, utgava) \
             if skala in ("auto", "20k", "bada") else []
-        # Ett delblad vars 1:20 000-del ligger utanfor omradet behovs inte.
+        # Ett delblad vars 1:20 000-del ligger utanfor omradet behovs inte --
+        # utom som reserv (nedan).
+        b20_funna = b20
         b20 = [b for b in b20 if set(rutor).intersection(celler_20k(b))]
         kand: dict[tuple[float, float], list] = {q: [] for q in rutor}
         for b in b10:
@@ -147,6 +151,26 @@ def kor(rutor: list[tuple[float, float]], utmapp: str, arkiv: str, dst_crs: str,
             for n, (serie, b) in enumerate(alla, 1):
                 leverera(serie, b)
                 r.framsteg(90 * n / len(alla))
+
+        # --- Reserv: delbladens del utanfor 1:20 000 -------------------------
+        # Kartan ar oftast tryckt aven i de rutor av ett delblad som indexet
+        # raknar till 1:10 000-serien. Den delen tas bara dar inget levererat
+        # blad tacker rutan, och klipps mot just de rutorna: den hamnar
+        # aldrig over ett 1:10 000-blad. I VRT:n ligger den underst.
+        if index:
+            for b in sorted(b20_funna, reverse=True,
+                            key=lambda b: _nyckel("1:20 000", b.ar, utgava)):
+                behov = [q for q in index.reservceller(b)
+                         if q in kand and q not in levererade_rutor]
+                huvud = gjorda.get(_id("1:20 000", b))
+                if not behov or (huvud and huvud.status != LEVERERAT):
+                    continue
+                _kolla(r)
+                rad = _blad_20k(b, os.path.join(tmp, MAPP_20K), bladmapp, dst_crs, r,
+                                index, reserv=behov)
+                s.rader.append(rad)
+                if rad.status == LEVERERAT:
+                    levererade_rutor.update(behov)
         s.overlapp = _overlapp(rutor, s.rader, kand, utgava)
 
         # --- Rutor utan karta --------------------------------------------------
@@ -247,8 +271,9 @@ def _nyckel(serie: str, ar: int | None, utgava: str) -> tuple:
 
 
 def _ordning(utgava: str):
-    """Samma regel i alla lagen, aven "bada": utgavevalet galler mellan skalorna."""
-    return lambda q: _nyckel(q.serie, q.ar, utgava)
+    """Samma regel i alla lagen, aven "bada": utgavevalet galler mellan skalorna.
+    En reservdel ligger alltid underst."""
+    return lambda q: (not q.reserv,) + _nyckel(q.serie, q.ar, utgava)
 
 
 def _tacker(d: Bladrad, x: float, y: float) -> bool:
@@ -341,13 +366,17 @@ def _utelamnat(rad: Bladrad, orsak: str) -> Bladrad:
     rad.status, rad.orsak = UTELAMNAT, orsak
     namn = f" {rad.bladnamn}" if rad.bladnamn else ""
     rad.rad = (f"Ekonomiska kartan {rad.serie}, blad {rad.blad}{namn} "
-               f"({rad.utgava or rad.ar or 'utan år'}): utelämnat -- {orsak}. "
+               f"({rad.utgava or rad.ar or 'utan år'})"
+               f"{', som ' + RESERV if rad.reserv else ''}: utelämnat -- {orsak}. "
                f"Bladet finns och kan hämtas för hand.")
     return rad
 
 
 def _blad_20k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor,
-              index: bladindex.Index20k | None = None) -> Bladrad:
+              index: bladindex.Index20k | None = None,
+              reserv: list[tuple[float, float]] | None = None) -> Bladrad:
+    """Ett 1:20 000-blad, eller med `reserv` de rutor av ett delblad utanfor
+    1:20 000-delen som ska tas som reserv -- en egen fil och en egen rad."""
     ruta = (b.minx, b.maxy - BLAD_20K_M, b.minx + BLAD_20K_M, b.maxy)
     rad = Bladrad(blad=b.katalog, serie="1:20 000", ruta=ruta, ar=b.ar,
                   utgava=str(b.ar) if b.ar else "", kalla=b.url)
@@ -355,7 +384,11 @@ def _blad_20k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor,
     if index:
         rad.bladnamn = index.bladnamn(b.katalog)
         gransidor = index.gransidor(b)
-        if index.ar_delblad(b):
+        if reserv:
+            rad.reserv = True
+            rad.celler = tuple(reserv)
+            rad.yta = bladindex.celler_wkt(reserv)
+        elif index.ar_delblad(b):
             rad.celler = tuple(index.celler(b))
             rad.yta = index.yta_wkt(b) or ""
     try:
@@ -366,18 +399,23 @@ def _blad_20k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor,
         return _utelamnat(rad, f"gick inte att hämta ({e})")
     d = cache_20k.las_matt(mapp, b.katalog)
     m = d.get("matt") or {}
-    rad.rad = _med_bladnamn(text, b.katalog, rad.bladnamn) + _om_delblad(rad)
+    rad.rad = _med_bladnamn(text, b.katalog, rad.bladnamn)
+    if rad.reserv:
+        # "blad J141-... Namn (1973): ..." blir "... (1973), reserv (...): ..."
+        rad.rad = rad.rad.replace(": ", f", {RESERV}: ", 1)
+    rad.rad += _om_delblad(rad)
     rad.metod = m.get("metod") or ""
     for k in ("passpunkter", "streck", "kors", "loo_medel_m", "loo_p95_m"):
         setattr(rad, k, m.get(k))
-    if rad.metod == "kant":
-        rad.anm = ANM_KANT
+    rad.anm = "; ".join(a for a in (RESERV if rad.reserv else "",
+                                    ANM_KANT if rad.metod == "kant" else "") if a)
     if not geo:
         rad.status, rad.orsak = UTELAMNAT, d.get("orsak") or "klarade inte spärrarna"
         return rad
+    skala = "20k_reserv" if rad.reserv else "20k"
     try:
         utfil = klipp.klipp(geo, ruta,
-                            os.path.join(bladmapp, _filnamn(b.katalog, b.ar, rad.utgava, "20k")),
+                            os.path.join(bladmapp, _filnamn(b.katalog, b.ar, rad.utgava, skala)),
                             dst_crs, rutnat_20k.PIXEL_M, r.varning, rad.yta or None)
     except Exception as e:                      # noqa: BLE001
         return _utelamnat(rad, f"georefererat men gick inte att skriva ({e})")
@@ -396,8 +434,11 @@ def _om_delblad(rad: Bladrad) -> str:
     if not rad.celler:
         return ""
     namn = [(blad_alla.ruta_for(x, y) or ("", f"{x:.0f},{y:.0f}"))[1] for x, y in rad.celler]
-    return (f" Bladet är bara delvis 1:20 000: {'rutan' if len(namn) == 1 else 'rutorna'} "
-            f"{', '.join(namn)}. Resten hör till 1:10 000-serien och är bortklippt.")
+    rutor = f"{'rutan' if len(namn) == 1 else 'rutorna'} {', '.join(namn)}"
+    if rad.reserv:
+        return f" Reserven täcker {rutor}, där inget annat blad finns i uttaget."
+    return (f" Bladet är bara delvis 1:20 000: {rutor}. Resten hör till "
+            f"1:10 000-serien och tas bara som reserv där inget annat blad finns.")
 
 
 def _ur_hk_cache(b, mapp: str, gransidor=()) -> tuple[str | None, str | None]:

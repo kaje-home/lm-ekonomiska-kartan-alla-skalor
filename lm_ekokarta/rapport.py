@@ -31,6 +31,8 @@ class Bladrad:
     # Tomma for ett helt blad, som tacker hela `ruta`.
     celler: tuple = ()
     yta: str = ""
+    # Delbladets rutor utanfor 1:20 000-delen, tagna dar inget annat blad finns.
+    reserv: bool = False
     utgava: str = ""
     metod: str = ""                   # världsfil, rutnät, kant
     status: str = UTELAMNAT
@@ -73,7 +75,7 @@ def ar_text(ar: list[int]) -> str:
 
 
 _FALT = [("blad", ogr.OFTString), ("bladnamn", ogr.OFTString), ("serie", ogr.OFTString),
-         ("ar", ogr.OFTInteger), ("delblad", ogr.OFTInteger),
+         ("ar", ogr.OFTInteger), ("delblad", ogr.OFTInteger), ("reserv", ogr.OFTInteger),
          ("utgava", ogr.OFTString), ("metod", ogr.OFTString), ("status", ogr.OFTString),
          ("orsak", ogr.OFTString), ("passpunkter", ogr.OFTInteger),
          ("streck", ogr.OFTInteger), ("kors", ogr.OFTInteger),
@@ -108,8 +110,9 @@ def skriv_gpkg(s: Sammanfattning, utfil: str, varna: Callable[[str], None] = pri
     for r in s.rader:
         f = ogr.Feature(defn)
         for namn, _ in _FALT:
-            if namn == "delblad":
-                v = (bool(r.yta) if r.serie == "1:20 000" else None)
+            if namn in ("delblad", "reserv"):
+                v = (bool(r.yta if namn == "delblad" else r.reserv)
+                     if r.serie == "1:20 000" else None)
             else:
                 v = getattr(r, namn)
             if v is None or v == "":
@@ -148,7 +151,8 @@ def skriv_gpkg(s: Sammanfattning, utfil: str, varna: Callable[[str], None] = pri
 
 
 def skriv_text(s: Sammanfattning, utfil: str, varna: Callable[[str], None] = print) -> str:
-    lev = [r for r in s.rader if r.status == LEVERERAT]
+    lev = [r for r in s.rader if r.status == LEVERERAT and not r.reserv]
+    reserv = [r for r in s.rader if r.status == LEVERERAT and r.reserv]
     ut = [r for r in s.rader if r.status == UTELAMNAT]
     saknas = [r for r in s.rader if r.status == SAKNAS]
     n10 = sum(r.serie == "1:10 000" for r in lev)
@@ -161,7 +165,9 @@ def skriv_text(s: Sammanfattning, utfil: str, varna: Callable[[str], None] = pri
         f"Område: {s.omrade}",
         f"Koordinatsystem: {s.dst_crs}. Skala: {s.skala}. Utgåva: {s.utgava}.",
         f"Levererade blad: {len(lev)} ({n10} i 1:10 000, {n20} i 1:20 000). "
-        f"Utelämnade: {len(ut)}. Rutor utan karta: {len(saknas)}.",
+        + (f"Reservdelar (delblad utanför 1:20 000-delen, där inget annat blad finns): "
+           f"{len(reserv)}. " if reserv else "")
+        + f"Utelämnade: {len(ut)}. Rutor utan karta: {len(saknas)}.",
         f"Tryckår: {ar_text(ar).replace('-', '–') if ar else 'inga'}.",
     ]
     if len(ar) > 1:
