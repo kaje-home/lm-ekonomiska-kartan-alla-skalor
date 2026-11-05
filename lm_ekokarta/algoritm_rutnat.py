@@ -18,7 +18,7 @@ from qgis.core import (Qgis, QgsApplication, QgsCoordinateReferenceSystem,
                        QgsProcessingParameterFileDestination,
                        QgsProcessingParameterNumber)
 
-from . import listning, rutnat, stil
+from . import bladindex, listning, rutnat, stil
 from .lm_ekokarta_karna import blad_alla
 
 
@@ -51,13 +51,17 @@ class Bladrutnat(QgsProcessingAlgorithm):
         return (
             "Bygger ett GeoPackage med bladrutorna för hela ekonomiska kartan, "
             "1:10 000 (5 km) och 1:20 000 (10 km), ur Lantmäteriets FTP-katalog.\n\n"
-            "Fält: blad, serie, skala, år (nyaste), äldsta år, alla år, antal "
-            "utgåvor, om bladet finns i arkivet (hämtat, georefererat eller "
-            "vägrat) och listningens datum.\n\n"
+            "Fält: blad, bladnamn (1:20 000), serie, skala, delblad, år (nyaste), "
+            "äldsta år, alla år, antal utgåvor, om bladet finns i arkivet "
+            "(hämtat, georefererat eller vägrat) och listningens datum.\n\n"
+            "Bladnamnen och delbladen kommer ur Lantmäteriets index över "
+            "1:20 000-bladen (Norrlands_Inland.shp). 80 blad vid gränsen mot "
+            "1:10 000-serien är bara delvis 1:20 000 (delblad = 1) och ritas som "
+            "den delen.\n\n"
             "Listningen tar omkring en minut och sparas med datum, i arkivet om "
-            "ett anges, annars i QGIS-profilen. Nästa gång används den sparade "
-            "listningen, om du inte kryssar i att lista på nytt. Datumet står i "
-            "lagrets namn och i fältet listad.\n\n"
+            "ett anges, annars i QGIS-profilen, och indexet sparas bredvid den. "
+            "Nästa gång används de sparade, om du inte kryssar i att lista på "
+            "nytt. Datumet står i lagrets namn och i fältet listad.\n\n"
             "Markera rutor i lagret och använd det som område i Hämta ekonomiska "
             "kartan med Endast markerade objekt: samma skal- och utgåveregler "
             "gäller som annars.")
@@ -100,9 +104,13 @@ class Bladrutnat(QgsProcessingAlgorithm):
                                  feedback.setProgress, feedback.isCanceled)
         except blad_alla.Katalogfel as e:
             raise QgsProcessingException(str(e))
+        # Lantmateriets index over 1:20 000-bladen, sparat och hamtat om
+        # tillsammans med listningen.
+        feedback.setProgressText("Läser indexet över 1:20 000-bladen")
+        index = bladindex.las(os.path.dirname(self._cache), ny, feedback.pushWarning)
         feedback.setProgressText("Skriver bladrutnätet")
         n10, n20, utfil = rutnat.bladrutnat(lis, self._arkiv, utfil, self._dst,
-                                            feedback.pushWarning)
+                                            feedback.pushWarning, index)
         feedback.pushInfo(f"Listat {lis.datum}: {n10} rutor i 1:10 000, {n20} blad i 1:20 000")
         namn = f"Bladrutnät, listat {lis.datum}"
         kalla = utfil + "|layername=bladrutnat"

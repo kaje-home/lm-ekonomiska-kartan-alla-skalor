@@ -6,6 +6,9 @@ uttaget, med alla eller bara markerade rutor.
 **Bladrutnatet** ar bladrutorna for bada serierna ur FTP-listningen
 (listning.py): en ruta per 1:10 000-blad (5 km) och per 1:20 000-blad (10
 km), med ar, antal utgavor, om bladet finns i arkivet och listningens datum.
+Med Lantmateriets index over 1:20 000-bladen (bladindex.py) far de
+bladnamnet, och ett blad vid seriegransen som bara delvis ar 1:20 000 ritas
+som den delen.
 
 **Det fasta rutnatet** ar kvadrater i SWEREF 99 TM med jamna koordinater:
 en ruta om 2,5 km borjar alltid pa en multipel av 2 500 m. Tva korningar
@@ -72,7 +75,8 @@ def _klar(tmp: str, utfil: str, varna) -> str:
 
 # --- Bladrutnatet ---------------------------------------------------------------
 
-_BLADFALT = [("blad", ogr.OFTString), ("serie", ogr.OFTString), ("skala", ogr.OFTInteger),
+_BLADFALT = [("blad", ogr.OFTString), ("bladnamn", ogr.OFTString), ("serie", ogr.OFTString),
+             ("skala", ogr.OFTInteger), ("delblad", ogr.OFTInteger),
              ("ar", ogr.OFTInteger), ("ar_aldsta", ogr.OFTInteger), ("ar_alla", ogr.OFTString),
              ("utgavor", ogr.OFTInteger), ("cachad", ogr.OFTInteger), ("cache", ogr.OFTString),
              ("katalog", ogr.OFTString), ("listad", ogr.OFTString)]
@@ -110,9 +114,10 @@ def _cache_20k(arkiv: str, b) -> tuple[int | None, str]:
 
 
 def bladrutnat(lis: Listning, arkiv: str, utfil: str, dst_crs: str = SWEREF,
-               varna=print) -> tuple[int, int, str]:
+               varna=print, index=None) -> tuple[int, int, str]:
     """Bladrutorna i `dst_crs`. (antal 1:10 000-rutor, antal 1:20 000-rutor,
-    filen)."""
+    filen). `index`: bladindex.Index20k, eller None (inga bladnamn, hela
+    blad)."""
     rt90, mal = _srs("EPSG:3021"), _srs(dst_crs)
     ct = osr.CoordinateTransformation(rt90, mal)
     ds, lager, tmp = _ny_gpkg(utfil, "bladrutnat", dst_crs, _BLADFALT)
@@ -120,12 +125,16 @@ def bladrutnat(lis: Listning, arkiv: str, utfil: str, dst_crs: str = SWEREF,
                                          f"{lis.datum}")
     defn = lager.GetLayerDefn()
 
-    def skriv(blad, serie, skala, utgavor, ruta, cache, katalog):
+    def skriv(blad, serie, skala, utgavor, ruta, cache, katalog, bladnamn="", yta=None):
         ar = sorted(b.ar for b in utgavor if b.ar)
         f = ogr.Feature(defn)
         f.SetField("blad", blad)
+        if bladnamn:
+            f.SetField("bladnamn", bladnamn)
         f.SetField("serie", serie)
         f.SetField("skala", skala)
+        if skala == 20000 and index is not None:
+            f.SetField("delblad", int(bool(yta)))
         if ar:
             f.SetField("ar", ar[-1])
             f.SetField("ar_aldsta", ar[0])
@@ -137,7 +146,7 @@ def bladrutnat(lis: Listning, arkiv: str, utfil: str, dst_crs: str = SWEREF,
         f.SetField("cache", cache[1])
         f.SetField("katalog", katalog)
         f.SetField("listad", lis.datum)
-        g = _rektangel(*ruta)
+        g = ogr.CreateGeometryFromWkt(yta) if yta else _rektangel(*ruta)
         g.Segmentize(100.0)           # rutans kanter ar inte raka i SWEREF
         g.Transform(ct)
         f.SetGeometry(g)
@@ -157,7 +166,9 @@ def bladrutnat(lis: Listning, arkiv: str, utfil: str, dst_crs: str = SWEREF,
     for (x, y), utg in sorted(per_omrade.items()):
         nyast = max(utg, key=lambda b: b.ar or 0)
         skriv(nyast.katalog, "1:20 000", 20000, utg, (x, y - BLAD_20K_M, x + BLAD_20K_M, y),
-              _cache_20k(arkiv, nyast), nyast.katalog)
+              _cache_20k(arkiv, nyast), nyast.katalog,
+              index.bladnamn(nyast.katalog) if index else "",
+              index.yta_wkt(nyast) if index else None)
     lager.CommitTransaction()
     lager = ds = None
     return len(per_ruta), len(per_omrade), _klar(tmp, utfil, varna)

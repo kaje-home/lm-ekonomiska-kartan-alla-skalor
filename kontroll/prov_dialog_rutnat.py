@@ -6,7 +6,7 @@ bakgrundsuppgift (tva ganger, sa att ett inlast bladrutnat ersatts), rutan
                                                        [--ut MAPP]
 
 Bladrutnatet byggs i utmappen, inte i arkivet. Arkivet ska ha listningen och
-16e2h med 1:20 000-bladet J141-16E2-3g-h77 (se prov_rutnat.py). Knappen
+1:10 000-bladet 16e2h (se prov_rutnat.py). Knappen
 Skapa fast rutnat oppnar Processings dialog och provas inte har.
 """
 from __future__ import annotations

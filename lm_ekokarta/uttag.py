@@ -12,7 +12,10 @@ utan QGIS. Gangen:
    provas bladen i ordningen "nyaste" (yngst forst) eller "aldsta" (aldst
    forst), 1:10 000 fore 1:20 000 vid samma ar, och det forsta som gar att
    leverera tar rutan. Ett blad som ingen ruta behover hamtas inte.
-4. Varje levererat blad klipps mot sin ruta i malets koordinatsystem.
+4. Varje levererat blad klipps mot sin ruta i malets koordinatsystem. Ett
+   1:20 000-blad vid seriegransen som bara delvis ar 1:20 000 (enligt
+   Lantmateriets index, bladindex.py) tar bara de rutorna och klipps mot den
+   delen; resten hor till 1:10 000-serien.
 5. VRT over alla, i samma ordning i alla lagen, aven "bada": det yngsta
    (eller aldsta) bladet overst, 1:10 000 vid samma ar.
 6. Brickor, om de bestallts: en GeoTIFF per ruta ur mosaiken (brickor.py).
@@ -31,6 +34,7 @@ import shutil
 from dataclasses import dataclass
 from typing import Callable
 
+from . import bladindex
 from . import brickor as brickmod
 from . import klipp, rapport
 from .lm_ekokarta_karna import blad_alla, cache_20k, rutnat_20k
@@ -75,11 +79,14 @@ def _kolla(r: Rapportor) -> None:
 def kor(rutor: list[tuple[float, float]], utmapp: str, arkiv: str, dst_crs: str,
         skala: str = "auto", utgava: str = "nyaste", vrt: bool = True,
         omrade: str = "", r: Rapportor | None = None,
-        brickor: list[brickmod.Bricka] | None = None, brick_pixel: float = 1.0
-        ) -> Sammanfattning:
+        brickor: list[brickmod.Bricka] | None = None, brick_pixel: float = 1.0,
+        index: bladindex.Index20k | None = None) -> Sammanfattning:
     """`rutor`: 5 km-rutorna (minx, maxy i RT 90) som omradet tacker.
-    `brickor`: rutor (i `dst_crs`) att skara ut ur mosaiken, en GeoTIFF var."""
+    `brickor`: rutor (i `dst_crs`) att skara ut ur mosaiken, en GeoTIFF var.
+    `index`: indexet over 1:20 000-bladen. Utan det tar varje 1:20 000-blad
+    alla fyra rutorna och klipps mot hela bladet, som fore 0.2.2."""
     r = r or Rapportor()
+    celler_20k = index.celler if index else blad_alla.rutor_20k
     if skala not in SKALOR:
         raise ValueError(f"skala ska vara en av {SKALOR}")
     s = Sammanfattning(omrade=omrade, dst_crs=dst_crs, skala=SKALA_TEXT[skala],
@@ -94,12 +101,14 @@ def kor(rutor: list[tuple[float, float]], utmapp: str, arkiv: str, dst_crs: str,
             if skala in ("auto", "10k", "bada") else []
         b20 = _sok(r, s, "1:20 000", blad_alla.hitta_20k, rutor, utgava) \
             if skala in ("auto", "20k", "bada") else []
+        # Ett delblad vars 1:20 000-del ligger utanfor omradet behovs inte.
+        b20 = [b for b in b20 if set(rutor).intersection(celler_20k(b))]
         kand: dict[tuple[float, float], list] = {q: [] for q in rutor}
         for b in b10:
             if (b.minx, b.maxy) in kand:
                 kand[(b.minx, b.maxy)].append(("1:10 000", b))
         for b in b20:
-            for q in blad_alla.rutor_20k(b):
+            for q in celler_20k(b):
                 if q in kand:
                     kand[q].append(("1:20 000", b))
         gjorda: dict[tuple, Bladrad] = {}
@@ -113,8 +122,9 @@ def kor(rutor: list[tuple[float, float]], utmapp: str, arkiv: str, dst_crs: str,
                     rad = _blad_10k(b, tmp, bladmapp, dst_crs, r)
                     tackta = [(b.minx, b.maxy)]
                 else:
-                    rad = _blad_20k(b, os.path.join(tmp, MAPP_20K), bladmapp, dst_crs, r)
-                    tackta = blad_alla.rutor_20k(b)
+                    rad = _blad_20k(b, os.path.join(tmp, MAPP_20K), bladmapp, dst_crs, r,
+                                    index)
+                    tackta = celler_20k(b)
                 gjorda[nyckel] = rad
                 s.rader.append(rad)
                 if rad.status == LEVERERAT:
@@ -242,6 +252,8 @@ def _ordning(utgava: str):
 
 
 def _tacker(d: Bladrad, x: float, y: float) -> bool:
+    if d.celler:                                # ett delblad: bara 1:20 000-delen
+        return (x, y) in d.celler
     minx, miny, maxx, maxy = d.ruta
     return minx <= x < maxx and miny < y <= maxy
 
@@ -327,25 +339,34 @@ def _blad_10k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor) -> Bladra
 
 def _utelamnat(rad: Bladrad, orsak: str) -> Bladrad:
     rad.status, rad.orsak = UTELAMNAT, orsak
-    rad.rad = (f"Ekonomiska kartan {rad.serie}, blad {rad.blad} "
+    namn = f" {rad.bladnamn}" if rad.bladnamn else ""
+    rad.rad = (f"Ekonomiska kartan {rad.serie}, blad {rad.blad}{namn} "
                f"({rad.utgava or rad.ar or 'utan år'}): utelämnat -- {orsak}. "
                f"Bladet finns och kan hämtas för hand.")
     return rad
 
 
-def _blad_20k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor) -> Bladrad:
+def _blad_20k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor,
+              index: bladindex.Index20k | None = None) -> Bladrad:
     ruta = (b.minx, b.maxy - BLAD_20K_M, b.minx + BLAD_20K_M, b.maxy)
     rad = Bladrad(blad=b.katalog, serie="1:20 000", ruta=ruta, ar=b.ar,
                   utgava=str(b.ar) if b.ar else "", kalla=b.url)
+    gransidor: tuple[str, ...] = ()
+    if index:
+        rad.bladnamn = index.bladnamn(b.katalog)
+        gransidor = index.gransidor(b)
+        if index.ar_delblad(b):
+            rad.celler = tuple(index.celler(b))
+            rad.yta = index.yta_wkt(b) or ""
     try:
-        geo, text = _ur_hk_cache(b, mapp)
+        geo, text = _ur_hk_cache(b, mapp, gransidor)
         if text is None:
-            geo, text, _ = cache_20k.blad_20k(b, mapp, r.info, r.steg)
+            geo, text, _ = cache_20k.blad_20k(b, mapp, r.info, r.steg, gransidor)
     except Exception as e:                      # noqa: BLE001
         return _utelamnat(rad, f"gick inte att hämta ({e})")
     d = cache_20k.las_matt(mapp, b.katalog)
     m = d.get("matt") or {}
-    rad.rad = text
+    rad.rad = _med_bladnamn(text, b.katalog, rad.bladnamn) + _om_delblad(rad)
     rad.metod = m.get("metod") or ""
     for k in ("passpunkter", "streck", "kors", "loo_medel_m", "loo_p95_m"):
         setattr(rad, k, m.get(k))
@@ -357,18 +378,36 @@ def _blad_20k(b, mapp: str, bladmapp: str, dst_crs: str, r: Rapportor) -> Bladra
     try:
         utfil = klipp.klipp(geo, ruta,
                             os.path.join(bladmapp, _filnamn(b.katalog, b.ar, rad.utgava, "20k")),
-                            dst_crs, rutnat_20k.PIXEL_M, r.varning)
+                            dst_crs, rutnat_20k.PIXEL_M, r.varning, rad.yta or None)
     except Exception as e:                      # noqa: BLE001
         return _utelamnat(rad, f"georefererat men gick inte att skriva ({e})")
     rad.status, rad.fil = LEVERERAT, utfil
     return rad
 
 
-def _ur_hk_cache(b, mapp: str) -> tuple[str | None, str | None]:
+def _med_bladnamn(text: str, katalog: str, bladnamn: str) -> str:
+    """"blad J141-17F0-1e-f73 (1973)" blir "blad J141-17F0-1e-f73 Mullberget (1973)"."""
+    if not bladnamn:
+        return text
+    return text.replace(f"blad {katalog}", f"blad {katalog} {bladnamn}", 1)
+
+
+def _om_delblad(rad: Bladrad) -> str:
+    if not rad.celler:
+        return ""
+    namn = [(blad_alla.ruta_for(x, y) or ("", f"{x:.0f},{y:.0f}"))[1] for x, y in rad.celler]
+    return (f" Bladet är bara delvis 1:20 000: {'rutan' if len(namn) == 1 else 'rutorna'} "
+            f"{', '.join(namn)}. Resten hör till 1:10 000-serien och är bortklippt.")
+
+
+def _ur_hk_cache(b, mapp: str, gransidor=()) -> tuple[str | None, str | None]:
     """Ett blad som LM Historiska kartor har georefererat i ett delat arkiv:
     dess json saknar raden till rapporten, och cache_20k.blad_20k skulle
     stupa pa den. Med samma metodversion ar utfallet detsamma, sa bladet
-    anvands -- utan matt. (None, None) om cachen inte ar en sadan."""
+    anvands -- utan matt. (None, None) om cachen inte ar en sadan.
+
+    Ett vagrat blad med kanter mot 1:10 000-omradet provas om av
+    cache_20k.blad_20k: LM Historiska kartor provar det utan dem."""
     logg = os.path.join(mapp, b.katalog + "_rt90.json")
     if not os.path.exists(logg):
         return None, None
@@ -382,7 +421,7 @@ def _ur_hk_cache(b, mapp: str) -> tuple[str | None, str | None]:
         return geo, (f"Ekonomiska kartan 1:20 000, blad {b.katalog}{arstr}: georefererat "
                      f"sedan tidigare (av LM Historiska kartor, samma metod); lägesfelet "
                      f"finns inte i arkivet.")
-    if not d.get("ok"):
+    if not d.get("ok") and not gransidor:
         return None, (f"Ekonomiska kartan 1:20 000, blad {b.katalog}{arstr}: utelämnat -- "
                       f"{d.get('orsak', '')}. Bladet finns och kan hämtas för hand.")
     return None, None

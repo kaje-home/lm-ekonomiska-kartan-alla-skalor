@@ -25,6 +25,7 @@ from qgis.core import (Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransfor
                        QgsProcessingParameterGeometry, QgsProcessingParameterNumber,
                        QgsRectangle)
 
+from . import algoritm_rutnat, bladindex
 from . import brickor as brickmod
 from . import rapport, rutnat, stil, uttag
 from .lm_ekokarta_karna import blad_alla
@@ -233,9 +234,13 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
         r = uttag.Rapportor(info=feedback.pushInfo, varning=feedback.pushWarning,
                             steg=feedback.setProgressText, framsteg=feedback.setProgress,
                             avbruten=feedback.isCanceled)
+        # Indexet over 1:20 000-bladen ligger bredvid listningens cache.
+        index = bladindex.las(os.path.dirname(algoritm_rutnat.cachefil(arkiv)),
+                              varna=feedback.pushWarning) if skala != "10k" else None
         try:
             s = uttag.kor(self._rutor, utmapp, arkiv, self._dst, skala, utgava,
-                          med_vrt, self._omrade, r, self._brickor or None, self._pixel)
+                          med_vrt, self._omrade, r, self._brickor or None, self._pixel,
+                          index)
         except uttag.Avbrutet:
             return {}
         lev = [q for q in s.rader if q.status == rapport.LEVERERAT]

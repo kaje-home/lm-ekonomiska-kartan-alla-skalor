@@ -9,7 +9,7 @@ Cachen per blad i `mapp` (i arkivet `<arkiv>/ekonomiska_kartan/20k/`):
 
     <katalog>.tif          den raa skanningen
     <katalog>_rt90.tif     den georefererade, RT 90, 2 m, exakt bladets 10 x 10 km
-    <katalog>_rt90.json    {ok, rad, orsak, version, matt}
+    <katalog>_rt90.json    {ok, rad, orsak, version, matt, gransidor}
 
 `matt` tillkom 2026-11-04 for det nya pluginets rapport: passpunkter, streck
 och lagesfel som tal. Faltunderlaget laser bara ok, rad och version, och en
@@ -29,7 +29,7 @@ from .ftp import hamta_fil
 
 
 def blad_20k(b, mapp: str, info: Callable[[str], None],
-             steg: Callable[[str], None]) -> tuple[str | None, str, int | None]:
+             steg: Callable[[str], None], gransidor=()) -> tuple[str | None, str, int | None]:
     """Hamta och georeferera ett 1:20 000-blad. (utfil eller None, rad, ar).
 
     Bade den raa skanningen och den georefererade filen sparas, och utfallet i
@@ -37,21 +37,28 @@ def blad_20k(b, mapp: str, info: Callable[[str], None],
     sa ett blad som redan provats -- lyckat eller inte -- provas inte om. Utom
     nar metoden har andrats (rutnat_20k.METOD_VERSION): ett blad som vagrades
     av en aldre metod kan klara en nyare.
+
+    `gransidor`: kanterna mot 1:10 000-omradet (rutnat_20k.georeferera_20k).
+    De sparas i json-filen. Ett vagrat blad provas om nar anroparen anger en
+    kant som inte var med da: LM Faltunderlag anger inga, sa ett blad som
+    det har vagrat i ett delat arkiv provas om av LM Ekonomiska kartan.
     """
     ra = os.path.join(mapp, b.katalog + ".tif")
     geo = os.path.join(mapp, b.katalog + "_rt90.tif")
     logg = os.path.join(mapp, b.katalog + "_rt90.json")
+    gransidor = sorted(gransidor or ())
     if os.path.exists(logg):
         with open(logg, encoding="utf-8") as f:
             d = json.load(f)
-        if d.get("version") == rutnat_20k.METOD_VERSION and (not d["ok"] or duger(geo)):
+        if d.get("version") == rutnat_20k.METOD_VERSION and (
+                duger(geo) if d["ok"] else set(gransidor) <= set(d.get("gransidor", []))):
             info(f"   {b.katalog}: georefererat sedan tidigare")
             return (geo if d["ok"] else None), d["rad"], b.ar
     if not duger(ra):
         steg(f"Hämtar {b.katalog} (1:20 000)")
         hamta_fil(ekokarta.fil_20k(b), ra)
     steg(f"Georefererar {b.katalog}")
-    res = rutnat_20k.georeferera_20k(ra, b.minx, b.maxy, geo)
+    res = rutnat_20k.georeferera_20k(ra, b.minx, b.maxy, geo, gransidor)
     rad = rutnat_20k.rad_for_uttag(b.katalog, b.ar, res)
     # Det som behovs for att forsta ett utelamnat blad i efterhand. Loggen
     # toms nar QGIS startas om; raden ovan gar till uttag.txt.
@@ -68,7 +75,8 @@ def blad_20k(b, mapp: str, info: Callable[[str], None],
         + ("" if res.ok else f" — {res.orsak}"))
     with open(logg, "w", encoding="utf-8") as f:
         json.dump({"ok": res.ok, "rad": rad, "orsak": res.orsak,
-                   "version": rutnat_20k.METOD_VERSION, "matt": matt(res)},
+                   "version": rutnat_20k.METOD_VERSION, "matt": matt(res),
+                   "gransidor": gransidor},
                   f, ensure_ascii=False)
     return (geo if res.ok else None), rad, b.ar
 
@@ -102,6 +110,7 @@ def matt(res) -> dict:
         "rms_grad2_m": res.rms_grad2_m,
         "loo_medel_m": res.loo_medel_m,
         "loo_p95_m": res.loo_p95_m,
+        "gransidor": list(res.gransidor) if res.metod == "kant" else None,
     }
 
 

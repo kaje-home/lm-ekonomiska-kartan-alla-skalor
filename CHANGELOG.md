@@ -1,5 +1,14 @@
 # Ändringar
 
+## 0.2.2 (2026-11-05)
+
+- **Blad mot seriegränsen.** Ett 1:20 000-blad som saknar kilometerstreck på kanten mot 1:10 000-området, och därför inte klarar kravet på streck, provas en gång till utan de kanterna: minst 16 streck på de övriga och samma 6 m-gräns. Rapporten säger vilken kant det gäller. Mullberget (J141-17F0-1e-f73) klarar sig nu med 5,7 m (95 %). Ny metodversion "2026-11-05 kant 6 m, seriegräns", så arkiverade 1:20 000-blad georefereras om en gång; de andra bladen blir som förut.
+- **Lantmäteriets index över 1:20 000-bladen** (`Norrlands_Inland.shp`) hämtas och sparas bredvid listningen. Det ger bladnamnet (till exempel *Mullberget*) i rapporten, bladlagret och bladrutnätet, och anger vilka kanter som vetter mot 1:10 000-området.
+- **Delblad klipps mot den del som är 1:20 000.** 80 blad vid seriegränsen är bara delvis 1:20 000. Förut levererades hela bladet, också de rutor som hör till 1:10 000-serien, och i läget *Automatiskt* kunde det täcka ett 1:10 000-blad där. Nu tar bladet bara sina 1:20 000-rutor. Rapporten säger det, och bladlagret och bladrutnätet ritar bara den delen (fältet `delblad`). Ett exempel är ruta 16e2h, som ger 1:10 000-bladet från 1958 och inte längre Halvar-Jonsberg från 1977.
+- `kontroll/prov_index.py` kontrollerar bladindelningen mot `Norrlands_Inland.shp` och `EkoRutor.shp`.
+- README: kända begränsningar i skarven mot 1:10 000 och en vit remsa på några blad, och rätt uppgift om bladindelningarna (två shapefiler, inga länsvisa).
+- Provat: alla 118 blad vid seriegränsen georefererade om med den nya metodversionen. 117 gav samma pixlar, mått och rad som förut, och Mullberget är det enda som ändrats. Proven i `kontroll/` i QGIS 3.44 och 4.2.
+
 ## 0.2.1 (2026-11-05)
 
 - **Ett uttag kraschar inte längre för att filerna från förra körningen är inlästa i QGIS.** I 0.2.0 kraschade rapporten, efter att allt hämtats, om `blad.gpkg` var inläst. Nu skrivs allt pluginet gör (blad, VRT, brickor, bladlager, rapport, bladrutnät, fast rutnät) först till en temporär fil, som sedan byts in. Är den gamla filen låst får den nya ett reservnamn, till exempel `blad.ny.gpkg`, och loggen säger det. Nästa gång filen går att skriva tas reservfilerna bort.

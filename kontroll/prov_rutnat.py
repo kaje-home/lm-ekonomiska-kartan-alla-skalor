@@ -5,13 +5,18 @@ uttag med markerade rutor och brickor, pa Sveg och Stromsund.
                                                 [--ut MAPP] [--utan-stort]
 
 Arkivet ska ha listningen (ekonomiska_kartan/listning.json) och bladen
-16e2h, de atta 1:20 000-bladen J141-16E2..16E6 kring Sveg och
-J141-20F6-7g-h74 (Stromsund). Saknas de hamtas och georefereras de, och
-listningen gors om (en minut); proven blir da langsamma men ska ga igenom.
+16e2h, de atta 1:20 000-bladen J141-16E2..16E6 kring Sveg,
+J141-20F6-7g-h74 (Stromsund) och J141-17F0-1e-f73 (Mullberget). Saknas de
+hamtas och georefereras de, och listningen och indexet gors om (en minut);
+proven blir da langsamma men ska ga igenom.
 
 Kraven:
-- bladrutnatet: bada skalorna, falten, listningsdatumet, cachestatus
-- en markerad bladruta (16e2h) ger en bricka, 1:20 000-bladet fran 1977 overst
+- bladrutnatet: bada skalorna, falten, listningsdatumet, cachestatus,
+  bladnamn och de 80 delbladen ur indexet
+- en markerad bladruta (16e2h) ger en bricka, 1:10 000-bladet fran 1958:
+  rutan ar inte 1:20 000 enligt indexet
+- Mullberget (delblad): bara den vastra halften, med bladnamn, gransida och
+  delblad i rapporten
 - fast rutnat: tva korningar over grannomraden ger samma rutor och namn
 - Sveg, bara 1:10 000: 4 brickor, 5 rutor utan kartdata
 - Sveg automatiskt och Stromsund med 2 m: 9 brickor vardera
@@ -119,25 +124,63 @@ print(f"bladrutnat: {res['RUTOR_10K']} rutor i 1:10 000, {res['BLAD_20K']} blad 
       f"listat {res['LISTAD']}")
 br = lager(res["BLADRUTNAT"], "bladrutnat")
 u.krav(res["RUTOR_10K"] > 11000 and res["BLAD_20K"] > 1000, "bladrutnat: bada skalorna")
-u.krav(br.fields().names()[1:] == ["blad", "serie", "skala", "ar", "ar_aldsta", "ar_alla",
-                                   "utgavor", "cachad", "cache", "katalog", "listad"],
+u.krav(br.fields().names()[1:] == ["blad", "bladnamn", "serie", "skala", "delblad", "ar",
+                                   "ar_aldsta", "ar_alla", "utgavor", "cachad", "cache",
+                                   "katalog", "listad"],
        "bladrutnat: falten")
 f = objekt(br, "\"blad\" = 'J141-16E2-3g-h77'")[0]
 u.krav(f["ar"] == 1977 and f["listad"] == res["LISTAD"], "bladrutnat: ar och listningsdatum")
 u.krav(f["cache"].startswith("georefererat"), f"bladrutnat: cachestatus ({f['cache']})")
 print("  1:10 000-rutor med flera utgavor:",
       len(objekt(br, "\"skala\" = 10000 AND \"utgavor\" > 1")))
+# Indexet: bladnamn och delblad. Halvar-Jonsberg ar ett L (16e2h ar
+# 1:10 000), Mullberget den vastra halften.
+delblad = objekt(br, "\"skala\" = 20000 AND \"delblad\" = 1")
+u.krav(len(delblad) == 80 and not objekt(br, "\"skala\" = 20000 AND \"delblad\" IS NULL"),
+       f"bladrutnat: 80 delblad ur indexet ({len(delblad)})")
+mull = objekt(br, "\"blad\" = 'J141-17F0-1e-f73'")[0]
+u.krav(f["bladnamn"] == "Halvar-Jonsberg" and f["delblad"] == 1
+       and abs(f.geometry().area() / 75e6 - 1) < 0.01
+       and mull["bladnamn"] == "Mullberget" and abs(mull.geometry().area() / 50e6 - 1) < 0.01,
+       f"bladrutnat: bladnamn och delbladens yta ({f['bladnamn']} "
+       f"{f.geometry().area() / 1e6:.1f} km², {mull['bladnamn']} "
+       f"{mull.geometry().area() / 1e6:.1f} km²)")
 
-# 2. En markerad bladruta.
+# 2. En markerad bladruta. 16e2h ar inte 1:20 000 enligt indexet: bara
+# 1:10 000-bladet fran 1958, aven om Halvar-Jonsberg (1977) ar tryckt dar.
 markera(br, "\"blad\" = '16e2h'")
 res = hamta("sveg_markerad", br)
-u.krav(res["LEVERERADE"] == 1 and res["AR"] == "1977" and res["BRICKOR_SKRIVNA"] == 1,
-       "markerad bladruta 16e2h: en bricka, 1:20 000 fran 1977")
+u.krav(res["LEVERERADE"] == 1 and res["AR"] == "1958" and res["BRICKOR_SKRIVNA"] == 1,
+       "markerad bladruta 16e2h: en bricka, 1:10 000 fran 1958")
 granska_brickor("sveg_markerad", 1.0, None)
 
+# 2b. Mullberget, bara 1:20 000: den vastra halften, georefererad utan den
+# ostra kanten, som saknar streck.
+markera(br, "\"blad\" = 'J141-17F0-1e-f73'")
+res = hamta("mullberget", br, SKALA=2)
+with open(os.path.join(UT, "mullberget", "rapport.txt"), encoding="utf-8") as f_:
+    rapport = f_.read()
+bl = lager(res["BLAD"], "mullberget_blad")
+g_blad = [q.geometry() for q in bl.getFeatures()]
+u.krav(res["LEVERERADE"] == 1 and res["BRICKOR_SKRIVNA"] == 1
+       and "J141-17F0-1e-f73 Mullberget (1973)" in rapport
+       and "östra kanten, mot 1:10 000-området, har inga streck" in rapport
+       and "bara delvis 1:20 000: rutorna" in rapport,
+       "Mullberget: levererat, med bladnamn, gransida och delblad i rapporten")
+vrt = gdal.Open(res["VRT_LAGER"])
+bredd = vrt.RasterXSize * vrt.GetGeoTransform()[1]
+vrt = None
+u.krav(len(g_blad) == 1 and abs(g_blad[0].area() / 50e6 - 1) < 0.01
+       and abs(bredd / 5000 - 1) < 0.05,         # rutan ar vriden i SWEREF
+       f"Mullberget: bladlagret och VRT:n bara den vastra halften "
+       f"({g_blad[0].area() / 1e6:.1f} km², VRT {bredd:.0f} m bred)")
+granska_brickor("mullberget", 1.0, None)
+
 # 3. Fast rutnat over Sveg-bladet och over en del av det.
-markera(br, "\"blad\" = 'J141-16E2-3g-h77'")
-sveg = objekt(br, "\"blad\" = 'J141-16E2-3g-h77'")[0].geometry()
+# Halvar-Jonsberg ar ett L; med 16e2h blir det hela 10 x 10 km-rutan.
+SVEG = "\"blad\" IN ('J141-16E2-3g-h77', '16e2h')"
+markera(br, SVEG)
+sveg = QgsGeometry.unaryUnion([q.geometry() for q in objekt(br, SVEG)])
 bb = sveg.boundingBox()
 DEL = (f"{bb.xMinimum() + 1000},{bb.xMinimum() + 7000},"
        f"{bb.yMinimum() + 1000},{bb.yMinimum() + 6000} [EPSG:3006]")

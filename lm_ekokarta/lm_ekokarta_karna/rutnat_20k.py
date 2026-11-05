@@ -60,6 +60,19 @@ viktad minsta kvadrat med rensning per slag av observation. Prövad mot
 rutnätsmetoden på sex linjeblad: 95 % under 3,1-4,1 m (ett sjörikt blad
 6,8 m). Lämna-en-utanför underskattar där felet med omkring 2 m.
 
+Mot seriegränsen (tillagt 2026-11-05)
+-------------------------------------
+Där ett 1:20 000-blad gränsar mot 1:10 000-området kan en hel kant sakna
+kilometerstreck: J141-17F0-1e-f73 (Mullberget) har inga på östra kanten,
+bara understrykningen av latitudtexten 62°16', som togs för ett streck. Av
+118 gränsblad var det det enda som vägrades för få streck. Anroparen kan
+därför ange `gransidor`, de kanter som helt vetter mot 1:10 000-området
+(ur Lantmäteriets index Norrlands_Inland.shp). Bara om bladet inte klarar
+streckkraven som vanligt används de: strecken på de kanterna används inte,
+och det räcker med MIN_STRECK_GRANS streck och MIN_STRECK_PER_KANT på var
+och en av de övriga kanterna. Övriga spärrar är desamma. Blad som klarar
+kraven som förut får exakt samma lösning.
+
 Endast numpy och GDAL, som finns i QGIS.
 """
 from __future__ import annotations
@@ -74,7 +87,7 @@ gdal.UseExceptions()
 
 # Hojs nar metoden andras sa att andra utfall ar mojliga. Cachen i arkivet
 # (hamta_ekokarta) provar da om bladen.
-METOD_VERSION = "2026-09-27 kant 6 m"
+METOD_VERSION = "2026-11-05 kant 6 m, seriegräns"
 
 CRS_EPSG = 3021            # RT 90 2,5 gon V, samma som 1:10 000-serien
 BLAD_M = 10000.0           # bladet är 10 x 10 km
@@ -109,6 +122,7 @@ STRECK_KONTRAST_MIN = 60   # så mycket mörkare än remsans median
 STRECK_BREDD_MAX = 5.0     # px vid halva höjden; bredare är text
 MIN_STRECK = 24            # av 36 möjliga
 MIN_STRECK_PER_KANT = 4
+MIN_STRECK_GRANS = 16      # med en kant mot 1:10 000 (beslut 2026-11-05)
 BETA_MAX_M = 12.0          # kanten mer än 6 px från bladgränsen: något annat fel
 KANT_LOO_P95_MAX_M = 6.0   # beslut 2026-09-27; verkligt fel ~2 m mer, se kravspecen
 KORS_ARM = (12, 30)        # px från mitten; korset är ett X med tom mitt
@@ -130,6 +144,10 @@ class Resultat:
     metod: str = "rutnät"          # eller "kant" för kors-bladen
     streck: int = 0                # kantmetoden: använda kilometerstreck
     kors: bool = False             # kantmetoden: mittkorset hittat
+    gransidor: tuple = ()          # kantmetoden: kanter utan streck, mot 1:10 000
+
+
+KANTNAMN = {"n": "norra", "s": "södra", "v": "västra", "o": "östra"}
 
 
 # ---------------------------------------------------------------------------
@@ -282,11 +300,14 @@ def _horn_inne_i_bilden(g: np.ndarray, minx: float, maxy: float, W: int, H: int)
 
 
 # ---------------------------------------------------------------------------
-def georeferera_20k(tif: str, minx: float, maxy: float, utfil: str) -> Resultat:
+def georeferera_20k(tif: str, minx: float, maxy: float, utfil: str,
+                    gransidor=()) -> Resultat:
     """Georeferera ett 1:20 000-blad och skriv en GeoTIFF i RT 90 över bladytan.
 
     minx, maxy: bladets västra och övre kant i RT 90, ur bladnamnet
     (ekokarta.tolka_20k). utfil skrivs bara om alla spärrar klaras.
+    gransidor: kanter ("n", "s", "v", "o") som helt vetter mot 1:10 000-området;
+    se modulens docstring. Påverkar bara kantmetoden.
     """
     lod, vag = _linjekontrast(tif)
     H, W = lod.shape
@@ -311,7 +332,7 @@ def georeferera_20k(tif: str, minx: float, maxy: float, utfil: str) -> Resultat:
         return _georeferera_kant(
             tif, minx, maxy, utfil,
             f"inget heldraget kilometerrutnät (kontrast {kv:.1f}/{kh:.1f}, "
-            f"gräns {KONTRAST_MIN})")
+            f"gräns {KONTRAST_MIN})", gransidor)
     if not (PERIOD_MIN < perx < PERIOD_MAX and PERIOD_MIN < pery < PERIOD_MAX):
         res.orsak = f"rutnätets period {perx:.1f}/{pery:.1f} px stämmer inte med 1:20 000"
         return res
@@ -533,7 +554,7 @@ def _kant_losning(obs: list, aktiv: np.ndarray) -> tuple[np.ndarray, np.ndarray]
 
 
 def _georeferera_kant(tif: str, minx: float, maxy: float, utfil: str,
-                      orsak_rutnat: str) -> Resultat:
+                      orsak_rutnat: str, gransidor=()) -> Resultat:
     """Kors-bladen: kartytans kant, kilometerstrecken och mittkorset.
 
     Varje observation säger bara det den vet: ett streck på norr- eller
@@ -573,6 +594,7 @@ def _georeferera_kant(tif: str, minx: float, maxy: float, utfil: str,
 
     B = BLAD_M
     obs = []          # (x, y, 'E'/'N', mål, betakoefficient, vikt, slag)
+    sida = []         # kanten ett streck sitter på; "" for övriga observationer
     per_kant = {}
     for namn, L, p0, p1, utat, lx in (("n", n, NV, NO, -1, True), ("s", s, SV, SO, +1, True),
                                       ("v", v, NV, SV, -1, False), ("o", o, NO, SO, +1, False)):
@@ -583,6 +605,7 @@ def _georeferera_kant(tif: str, minx: float, maxy: float, utfil: str,
                 obs.append((x, y, "E", minx + i * KM, 0.0, 1.0, "streck"))
             else:
                 obs.append((x, y, "N", maxy - i * KM, 0.0, 1.0, "streck"))
+            sida.append(namn)
     for namn, lx, vad, mal, bk in (("n", True, "N", maxy, 1.0), ("s", True, "N", maxy - B, -1.0),
                                    ("v", False, "E", minx, -1.0), ("o", False, "E", minx + B, 1.0)):
         r = ra[namn]
@@ -592,47 +615,68 @@ def _georeferera_kant(tif: str, minx: float, maxy: float, utfil: str,
                 continue
             q = float(np.nanmedian(q))
             obs.append(((t, q) if lx else (q, t)) + (vad, mal, bk, KANT_VIKT, "kant"))
+            sida.append("")
     mitt = (NV + NO + SV + SO) / 4
     kors = _mittkors(g, mitt[0], mitt[1])
     g = None
     if kors is not None:
         obs.append((kors[0], kors[1], "E", minx + B / 2, 0.0, 1.0, "kors"))
         obs.append((kors[0], kors[1], "N", maxy - B / 2, 0.0, 1.0, "kors"))
-
-    # Robust: rensa per slag, sa att de manga kantpunkterna inte bestammer
-    # vad som ar ett avvikande streck.
+        sida += ["", ""]
     slag = np.array([o_[6] for o_ in obs])
-    aktiv = np.ones(len(obs), bool)
-    for _ in range(8):
+
+    def anpassa(tillaten):
+        """Robust: rensa per slag, sa att de manga kantpunkterna inte
+        bestammer vad som ar ett avvikande streck. `tillaten`: observationer
+        som far vara med alls."""
+        aktiv = tillaten.copy()
+        for _ in range(8):
+            c, fel = _kant_losning(obs, aktiv)
+            ny = aktiv.copy()
+            for sl in ("streck", "kant", "kors"):
+                m = slag == sl
+                if (m & aktiv).any():
+                    ny[m] = np.abs(fel[m]) < max(3.0, 4 * np.median(np.abs(fel[m & aktiv])))
+            ny &= tillaten
+            if (ny == aktiv).all():
+                break
+            aktiv = ny
         c, fel = _kant_losning(obs, aktiv)
-        ny = aktiv.copy()
-        for sl in ("streck", "kant", "kors"):
-            m = slag == sl
-            if (m & aktiv).any():
-                ny[m] = np.abs(fel[m]) < max(3.0, 4 * np.median(np.abs(fel[m & aktiv])))
-        if (ny == aktiv).all():
-            break
-        aktiv = ny
-    c, fel = _kant_losning(obs, aktiv)
-    res.streck = int(((slag == "streck") & aktiv).sum())
-    res.kors = bool(((slag == "kors") & aktiv).any())
-    beta = float(c[12])
+        res.streck = int(((slag == "streck") & aktiv).sum())
+        res.kors = bool(((slag == "kors") & aktiv).any())
 
-    # Period och vridning ur modellens lutning mitt pa bladet.
-    rc = _rader(mitt[0], mitt[1])
-    rx, ry = _rader(mitt[0] + 1, mitt[1]), _rader(mitt[0], mitt[1] + 1)
-    dEx, dNx = (rx - rc) @ c[0:6], (rx - rc) @ c[6:12]
-    dEy, dNy = (ry - rc) @ c[0:6], (ry - rc) @ c[6:12]
-    perx, pery = KM / np.hypot(dEx, dNx), KM / np.hypot(dEy, dNy)
-    # Vriden bild: x-axeln pekar at (cos v, sin v), y-axeln (nedat) at (sin v, -cos v).
-    vx, vy = np.arctan2(dNx, dEx), np.arctan2(dEy, -dNy)
-    res.period_px = (float(perx), float(pery))
-    res.vridning_grader = float(np.degrees((vx + vy) / 2))
+        # Period och vridning ur modellens lutning mitt pa bladet.
+        rc = _rader(mitt[0], mitt[1])
+        rx, ry = _rader(mitt[0] + 1, mitt[1]), _rader(mitt[0], mitt[1] + 1)
+        dEx, dNx = (rx - rc) @ c[0:6], (rx - rc) @ c[6:12]
+        dEy, dNy = (ry - rc) @ c[0:6], (ry - rc) @ c[6:12]
+        perx, pery = KM / np.hypot(dEx, dNx), KM / np.hypot(dEy, dNy)
+        # Vriden bild: x-axeln pekar at (cos v, sin v), y-axeln (nedat) at (sin v, -cos v).
+        vx, vy = np.arctan2(dNx, dEx), np.arctan2(dEy, -dNy)
+        res.period_px = (float(perx), float(pery))
+        res.vridning_grader = float(np.degrees((vx + vy) / 2))
+        return aktiv, c, fel, perx, pery, vx, vy
 
+    aktiv, c, fel, perx, pery, vx, vy = anpassa(np.ones(len(obs), bool))
     kanter = {k_: len(st) for k_, st in per_kant.items()}
     if res.streck < MIN_STRECK or min(kanter.values()) < MIN_STRECK_PER_KANT:
-        return vagra(f"för få kilometerstreck i marginalen ({res.streck} av 36; "
-                     + ", ".join(f"{k_} {n_}" for k_, n_ in kanter.items()) + ")")
+        orsak = (f"för få kilometerstreck i marginalen ({res.streck} av 36; "
+                 + ", ".join(f"{k_} {n_}" for k_, n_ in kanter.items()) + ")")
+        grans = sorted(set(gransidor) & set(kanter))
+        ovriga = [n_ for k_, n_ in kanter.items() if k_ not in grans]
+        if not grans or not ovriga or min(ovriga) < MIN_STRECK_PER_KANT:
+            return vagra(orsak)
+        # En eller flera kanter vetter mot 1:10 000-omradet och har inga
+        # streck: lat bli dem helt (det som hittas dar ar text) och kräv
+        # strecken pa de ovriga.
+        aktiv, c, fel, perx, pery, vx, vy = anpassa(
+            np.array([s_ not in grans for s_ in sida]))
+        res.gransidor = tuple(grans)
+        if res.streck < MIN_STRECK_GRANS:
+            return vagra(f"{orsak}, och utan kanterna mot 1:10 000-området "
+                         f"({', '.join(KANTNAMN[k_] for k_ in grans)}) {res.streck} "
+                         f"streck, gräns {MIN_STRECK_GRANS}")
+    beta = float(c[12])
     if not (PERIOD_MIN < perx < PERIOD_MAX and PERIOD_MIN < pery < PERIOD_MAX):
         return vagra(f"skalan {perx:.1f}/{pery:.1f} px per km stämmer inte med 1:20 000")
     if abs(perx - pery) > PERIOD_SKILLNAD_MAX:
@@ -689,7 +733,11 @@ def rad_for_uttag(bladnamn: str, ar: int | None, r: Resultat) -> str:
         return (f"Ekonomiska kartan 1:20 000, blad {bladnamn}{arstr}: rutnätet är "
                 f"bara tryckt som streck i marginalen, så bladet är georefererat mot "
                 f"kartytans kant och {r.streck} kilometerstreck"
-                f"{' samt korset mitt på bladet' if r.kors else ''}. Lägesfel i "
+                f"{' samt korset mitt på bladet' if r.kors else ''}"
+                + (f" ({' och '.join(KANTNAMN[k] for k in r.gransidor)} "
+                   f"{'kanten' if len(r.gransidor) == 1 else 'kanterna'}, mot "
+                   f"1:10 000-området, har inga streck)" if r.gransidor else "")
+                + ". Lägesfel i "
                 f"georefereringen {r.loo_medel_m:.1f} m i medel, {r.loo_p95_m:.1f} m "
                 f"för 95 % -- prövat mot blad med heldraget rutnät är det verkliga "
                 f"felet omkring 2 m större. Det gäller georefereringen, inte kartan: "

@@ -56,6 +56,8 @@ I utmappen:
 
 **Där båda skalorna finns gäller utgåvevalet även mellan dem.** Med *Nyaste* tas det yngsta bladet och med *Äldsta* det äldsta, oavsett skala; är bladen från samma år tas 1:10 000. Vägras bladet tas nästa. Ett blad som ingen ruta behöver hämtas inte. Ett 1:20 000-blad täcker fyra 1:10 000-rutor, så båda skalorna kan ändå hamna i samma mosaik. VRT:n ordnas efter samma regel, och rapporten skriver för varje ruta där skalorna överlappar vilket blad som ligger överst, vad som ligger under och vad som inte hämtades. Med *Båda serierna* hämtas alla blad i båda skalorna, ordnade efter samma regel.
 
+**Delblad vid seriegränsen.** 80 av 1:20 000-bladen är bara delvis 1:20 000: en, två eller tre av bladets fyra rutor. Resten hör till 1:10 000-serien, fast kartan ofta är tryckt där också. Lantmäteriets index över 1:20 000-bladen (`Norrlands_Inland.shp`) anger vilka rutor det är. Ett sådant blad tar bara de rutorna och klipps mot dem. Rapporten och bladlagret säger det, och bladlagret ritar bara den delen. Går indexet inte att hämta klipps bladet som förut mot hela rutan, och loggen varnar.
+
 **1:10 000-bladen från 1950-talet i Norrland kan vara nästan rena fotokartor**: flygbilden med lite tryckt kartinnehåll. Ett sådant blad kan vinna över ett yngre 1:20 000-blad med *Äldsta*, eller med *Nyaste* där inget yngre blad finns. Se tryckåret i bladlagret innan du klassar markslag (nedan).
 
 **Samma utmapp igen.** Ett nytt uttag till samma utmapp skriver över det förra. Dialogen tar först bort lagren från det förra uttaget ur projektet. Blad som redan finns, gjorda ur samma källa med samma inställningar, används som de är. Är en fil ändå öppen, till exempel inläst i QGIS, får den nya filen ett reservnamn, som `blad.ny.gpkg`, och loggen säger det.
@@ -73,7 +75,9 @@ Två rutnät går att använda som område, med alla rutor eller bara de markera
 | Fält | |
 |---|---|
 | `blad` | rutan (`16e2h`) eller 1:20 000-bladets katalog (`J141-16E2-3g-h77`) |
+| `bladnamn` | 1:20 000-bladets namn ur Lantmäteriets index (`Halvar-Jonsberg`) |
 | `serie`, `skala` | `1:10 000` / 10000 eller `1:20 000` / 20000 |
+| `delblad` | 1 för ett 1:20 000-blad som bara delvis är 1:20 000; det ritas som den delen |
 | `ar`, `ar_aldsta`, `ar_alla` | nyaste och äldsta tryckår och alla utgåvor |
 | `utgavor` | antal utgåvor |
 | `cachad`, `cache` | om bladet finns i arkivet: *hämtat*, *georefererat (rutnät/kant)*, *vägrat* med orsaken, eller *nej* |
@@ -81,9 +85,9 @@ Två rutnät går att använda som område, med alla rutor eller bara de markera
 
 Lagret får färg efter skala och tryckår. 1:10 000-rutorna fylls halvgenomskinligt efter årtionde, och 1:20 000-bladen ritas med streckad kontur i samma färger, så att de syns ovanpå. Rutor utan årtal är grå.
 
-**Listningen tar omkring en minut** och sparas med datum, i `ekonomiska_kartan/listning.json` i arkivet om du har ett, annars i QGIS-profilen. Nästa gång används den sparade listningen. Kryssa i *lista FTP:n på nytt* för att hämta en färsk. Datumet står i lagrets namn (*Bladrutnät, listat 2026-11-05*) och i fältet `listad`.
+**Listningen tar omkring en minut** och sparas med datum, i `ekonomiska_kartan/listning.json` i arkivet om du har ett, annars i QGIS-profilen. Indexet över 1:20 000-bladen sparas bredvid, i `index_20k/`. Nästa gång används de sparade. Kryssa i *lista FTP:n på nytt* för att hämta färska. Datumet står i lagrets namn (*Bladrutnät, listat 2026-11-05*) och i fältet `listad`.
 
-**Markera bladen du vill ha och tryck Hämta.** *Markera i kartan…* gör rutnätet till aktivt lager, startar markeringsverktyget och gömmer dialogen tills du trycker Enter eller högerklickar. Samma skal- och utgåveregler gäller som annars. Att markera ett 1:20 000-blad betyder alltså *det här området*, inte *det här bladet*: med *Automatiskt* och *Nyaste* kan det bli ett yngre 1:10 000-blad där ett sådant finns. Vill du ha just 1:20 000-bladet, välj *Bara 1:20 000*.
+**Markera bladen du vill ha och tryck Hämta.** *Markera i kartan…* gör rutnätet till aktivt lager, startar markeringsverktyget och gömmer dialogen tills du trycker Enter eller högerklickar. Samma skal- och utgåveregler gäller som annars. Att markera ett 1:20 000-blad betyder alltså *det här området*, inte *det här bladet*: med *Automatiskt* och *Nyaste* kan det bli ett yngre 1:10 000-blad där ett sådant finns. Vill du ha just 1:20 000-bladet, välj *Bara 1:20 000*. Ett delblad ger bara sin 1:20 000-del.
 
 ### Fast rutnät
 
@@ -120,6 +124,8 @@ Bladnamnet, till exempel `J141-20F6-7g-h74`, ger bladets läge i RT 90: samma 5 
 
 - **Rutnätsmetoden**, på blad med heldraget kilometerrutnät: rutnätets 81 korsningar mäts och blir passpunkter. Felet (lämna-en-utanför, 95 %) får vara högst 4 m; provade blad ligger på 1,2–2,8 m.
 - **Kantmetoden**, på blad där rutnätet bara är tryckt som streck i marginalen: kartytans kant, kilometerstrecken och ibland ett kors mitt på bladet. Felet får vara högst 6 m. Prövat mot rutnätsbladen underskattar måttet det verkliga felet med omkring 2 m, så 6 m motsvarar omkring 8 m.
+
+**Mot seriegränsen** saknar en del blad kilometerstreck på den kant som vetter mot 1:10 000-området. Klarar ett sådant blad inte kravet på streck, provas kantmetoden en gång till utan de kanterna, med minst 16 streck på de övriga och samma 6 m-gräns. Vilka kanter det gäller tas ur Lantmäteriets index. Rapporten säger det, till exempel *(östra kanten, mot 1:10 000-området, har inga streck)*.
 
 Båda ger en GeoTIFF över exakt bladets 10 × 10 km med 2 m pixlar. **Ett blad som inte klarar kontrollerna lämnas utanför, med orsaken i rapporten.** Hellre ett blad för lite än ett som ligger fel. Lägesfelet gäller georefereringen, inte kartans innehåll: vad kartan själv visar är osäkrare än så.
 
@@ -182,6 +188,7 @@ Utan arkiv laddas bladen ned till utmappen och städas bort efteråt. Med ett ar
 
 - `ekonomiska_kartan/` – 1:10 000-bladen med världsfil, som Lantmäteriet levererar dem
 - `ekonomiska_kartan/20k/` – för varje 1:20 000-blad den råa skanningen (~80–120 MB), den georefererade filen och utfallet i en `.json`
+- `ekonomiska_kartan/listning.json` och `ekonomiska_kartan/index_20k/` – FTP-listningen och Lantmäteriets index över 1:20 000-bladen
 
 Georefereringen ger samma svar varje gång, så ett blad som redan provats provas inte om, lyckat eller inte, så länge metoden inte ändrats. Arkivet har samma uppställning som i LM Fältunderlag, och de två kan dela arkiv.
 
@@ -192,7 +199,9 @@ Georefereringen ger samma svar varje gång, så ett blad som redan provats prova
 - **Svartvita blad är inte provade.** Kantmetoden vägrar skanningar som inte är i färg.
 - **Några udda skanningsformat** i 1:20 000-serien är inte provade.
 - **Ihoptryckta 1:10 000-blad.** Enligt en genomgång i 1:10 000-pluginet ovan är omkring 190 utgåvor skannade större än sin ruta, och Lantmäteriets världsfil trycker ihop hela skanningen till rutan. De bladen ligger fel och lämnas utanför, med orsaken. De finns ofta i en annan utgåva.
-- **1:10 000-bladens läge mäts inte.** De använder Lantmäteriets världsfil som den är, granskad men inte mätt.
+- **1:10 000-bladens läge mäts inte.** De använder Lantmäteriets världsfil som den är. Pluginet granskar att den är rimlig, men världsfilerna är inte kontrollmätta.
+- **Skarven mellan 1:20 000 och 1:10 000 kan visa förskjutningar på upp till omkring 10–15 m.** Vid Mullberget (J141-17F0-1e-f73) var förskjutningen mot 1:10 000-bladen från 1958, mätt per kilometerruta, i median omkring 4 m och för 95 % av rutorna upp till 12 m, med ett systematiskt mönster. Hur mycket som är georefereringen och hur mycket som är 1:10 000-bladens världsfiler går inte att skilja.
+- **Vit remsa innanför bladgränsen.** På några 1:20 000-blad är den tryckta kartytan 200–330 m kortare än 10 km åt ett håll, fast rutnätet ligger rätt. Remsan är papper och täcker det som ligger under i mosaiken. Sett på 7 av 118 blad vid seriegränsen, bland annat J141-21J4-5a-b78 och J141-26K4-5i-j74, och på ett blad till (J141-21E0-1c-d76).
 - **16 filnamn i 1:10 000-serien går inte att tolka**, av omkring 12 000. 14 saknar årtal (t.ex. `133_11j1j`), och två av dem ligger dessutom i fel blockkatalog. 2 är sammanslagna blad (`133_3c0a-b71`). De kommer inte med, varken i bladrutnätet eller i uttaget.
 - **Ljus kantlinje i skarvar.** Där ett blad ligger ett par meter fel kan bladets egen kant synas som en ljus linje, 1–2 pixlar bred, mot grannbladet. Det syns mest på blad som georefererats mot kilometerstrecken i marginalen.
 - **Kartan är inte rikstäckande.** Delar av landet, framför allt fjällen, saknas i båda serierna. En ruta utan karta står i bladlagret som *saknas*.
@@ -201,7 +210,9 @@ Georefereringen ger samma svar varje gång, så ett blad som redan provats prova
 
 ## Data och licens
 
-Kartdatan är Lantmäteriets öppna data, **CC0**, och hämtas direkt från `ftp://download-opendata.lantmateriet.se/Ekonomiska_kartan/`. Ingen inloggning eller avgift. Källhänvisning är inte ett krav enligt CC0, men skriv gärna *Ekonomiska kartan, Lantmäteriet*. Bladindelningskartor finns som PDF i katalogen `Bladindelningskartor` på samma FTP.
+Kartdatan är Lantmäteriets öppna data, **CC0**, och hämtas direkt från `ftp://download-opendata.lantmateriet.se/Ekonomiska_kartan/`. Ingen inloggning eller avgift. Källhänvisning är inte ett krav enligt CC0, men skriv gärna *Ekonomiska kartan, Lantmäteriet*.
+
+Bladindelningen finns som två shapefiler på samma FTP: `Bladindelningskartor/Shape/EkoRutor.shp` för 1:10 000 och `Norrlands_inland/Norrlands_Inland.shp` för 1:20 000. Några länsvisa shapefiler finns inte; de länsvisa bladindelningarna i `Bladindelningskartor` är skannade kartor. Pluginet räknar bladens läge ur namnen och använder `Norrlands_Inland.shp` för bladnamnen och delbladen. `kontroll/prov_index.py` kontrollerar bladindelningen mot båda indexen.
 
 **Fristående tillägg, inte från Lantmäteriet.** Frågor om pluginet hör hemma i förrådets ärenden här på GitHub, inte hos Lantmäteriets support. Det kommer utan garantier; kontrollera lägesfelet i rapporten innan du bygger något på ett blad.
 

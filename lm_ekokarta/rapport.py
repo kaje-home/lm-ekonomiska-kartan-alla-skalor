@@ -25,6 +25,12 @@ class Bladrad:
     serie: str                        # "1:10 000", "1:20 000" eller "" (ingen karta)
     ruta: tuple[float, float, float, float]   # minx, miny, maxx, maxy i RT 90
     ar: int | None = None
+    bladnamn: str = ""                # 1:20 000: namnet i Lantmateriets index, t.ex. Mullberget
+    # Ett 1:20 000-blad vid seriegransen som bara delvis ar 1:20 000: de 5
+    # km-rutor (minx, maxy) som ar det, och den delen som polygon (WKT, RT 90).
+    # Tomma for ett helt blad, som tacker hela `ruta`.
+    celler: tuple = ()
+    yta: str = ""
     utgava: str = ""
     metod: str = ""                   # världsfil, rutnät, kant
     status: str = UTELAMNAT
@@ -66,7 +72,8 @@ def ar_text(ar: list[int]) -> str:
     return str(ar[0]) if len(ar) == 1 else f"{ar[0]}-{ar[-1]}"
 
 
-_FALT = [("blad", ogr.OFTString), ("serie", ogr.OFTString), ("ar", ogr.OFTInteger),
+_FALT = [("blad", ogr.OFTString), ("bladnamn", ogr.OFTString), ("serie", ogr.OFTString),
+         ("ar", ogr.OFTInteger), ("delblad", ogr.OFTInteger),
          ("utgava", ogr.OFTString), ("metod", ogr.OFTString), ("status", ogr.OFTString),
          ("orsak", ogr.OFTString), ("passpunkter", ogr.OFTInteger),
          ("streck", ogr.OFTInteger), ("kors", ogr.OFTInteger),
@@ -101,14 +108,19 @@ def skriv_gpkg(s: Sammanfattning, utfil: str, varna: Callable[[str], None] = pri
     for r in s.rader:
         f = ogr.Feature(defn)
         for namn, _ in _FALT:
-            v = getattr(r, namn)
+            if namn == "delblad":
+                v = (bool(r.yta) if r.serie == "1:20 000" else None)
+            else:
+                v = getattr(r, namn)
             if v is None or v == "":
                 f.SetFieldNull(namn)
             else:
                 f.SetField(namn, int(v) if isinstance(v, bool) else v)
         minx, miny, maxx, maxy = r.ruta
-        g = ogr.CreateGeometryFromWkt(
+        # Ett delblad ritas som den del som ar 1:20 000.
+        g = ogr.CreateGeometryFromWkt(r.yta or
             f"POLYGON(({minx} {miny},{maxx} {miny},{maxx} {maxy},{minx} {maxy},{minx} {miny}))")
+        g = ogr.ForceToPolygon(g)
         g.Segmentize(100.0)            # rutans kanter ar inte raka i SWEREF
         g.Transform(ct)
         f.SetGeometry(g)

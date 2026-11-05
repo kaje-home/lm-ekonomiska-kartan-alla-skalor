@@ -54,17 +54,22 @@ def _som_rgb(ds):
 
 
 def klipp(kalla: str, ruta: tuple[float, float, float, float], utfil: str,
-          dst_crs: str, pixel_m: float, varna: Callable[[str], None] = print) -> str:
+          dst_crs: str, pixel_m: float, varna: Callable[[str], None] = print,
+          yta_wkt: str | None = None) -> str:
     """Skriv `kalla` (i RT 90) till `utfil` i `dst_crs`, klippt mot `ruta`
     (minx, miny, maxx, maxy i RT 90), med alfaband. Halvfardig fil tills den
     ar kontrollerad. Returnerar namnet filen fick (filbyte.byt_in).
+
+    `yta_wkt`: klipp i stallet mot den har polygonen i RT 90 -- den del av
+    ett 1:20 000-blad vid seriegransen som ar 1:20 000 (bladindex).
 
     Finns bladet redan i utmappen, gjort ur samma kalla med samma
     installningar (KALLA_NYCKEL i filen), anvands det som det ar. Det sparar
     tid, och framfor allt behover filen inte skrivas om: ett blad som en
     inlast VRT har last i QGIS ar last tills QGIS startas om."""
     gdal.UseExceptions()
-    nyckel = _nyckel(kalla, ruta, dst_crs, pixel_m)
+    # Ett helt blad far samma nyckel som fore 0.2.2, sa att det inte gors om.
+    nyckel = _nyckel(kalla, ruta, dst_crs, pixel_m) + (f"|{yta_wkt}" if yta_wkt else "")
     for f in [utfil] + reserver(utfil):
         if _har_nyckel(f, nyckel):
             return f
@@ -77,7 +82,7 @@ def klipp(kalla: str, ruta: tuple[float, float, float, float], utfil: str,
     # inget alls -- RT 90 anges alltid uttryckligen.
     with gdal.config_options({"GDAL_PAM_ENABLED": "NO"}):
         gdal.Warp(tmp, src, format="GTiff", srcSRS=RT90, dstSRS=dst_crs,
-                  cutlineWKT=rektangel_wkt(*ruta), cutlineSRS=RT90,
+                  cutlineWKT=yta_wkt or rektangel_wkt(*ruta), cutlineSRS=RT90,
                   cropToCutline=True, dstAlpha=True,
                   xRes=pixel_m, yRes=pixel_m, targetAlignedPixels=True,
                   # I RT 90 ligger pixlarna redan ratt: ingen omsampling.
