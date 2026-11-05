@@ -1,5 +1,9 @@
 # LM Ekonomiska kartan – alla skalor
 
+![Två ihopfogade kartblad ur ekonomiska kartan vid Häggenås](docs/haggenas.jpg)
+
+*Två kartblad från ekonomiska kartan vid Häggenås, inpassade automatiskt och ihopfogade. Skarven går lodrätt mitt i bilden, och vägar och ägogränser fortsätter rakt över den. Färgskillnaden kommer från olika tryck av bladen.*
+
 Rita eller välj ett område i QGIS och få Lantmäteriets ekonomiska karta över det som georefererade kartblad, i 1:10 000 där den serien finns och i 1:20 000 där den inte gör det. Du behöver inte veta vilken skala eller vilken fil som gäller var.
 
 ## ⬇️ [Ladda ner senaste versionen](https://github.com/kaje-home/lm-ekonomiska-kartan-alla-skalor/releases/latest/download/lm_ekokarta.zip)
