@@ -2,17 +2,19 @@
 
 Alla val blir parametrar till lmeko:hamta_ekonomiska_kartan, och arbetet kors
 som en bakgrundsuppgift sa att QGIS gar att anvanda under tiden. Det som
-dialogen gor utover algoritmen ar att lata en rita omradet i kartan och att
-lagga in resultatet i en grupp nar det ar klart.
+dialogen gor utover algoritmen ar att lata en rita omradet i kartan, bygga
+bladrutnatet och valja det som omrade, och lagga in resultatet i en grupp
+nar det ar klart.
 """
 from __future__ import annotations
 
-from qgis.core import (Qgis, QgsApplication, QgsCategorizedSymbolRenderer,
-                       QgsCoordinateReferenceSystem, QgsFillSymbol,
+import os
+
+from qgis.core import (Qgis, QgsApplication, QgsCoordinateReferenceSystem,
                        QgsProcessingAlgRunnerTask, QgsProcessingContext,
                        QgsProcessingFeatureSourceDefinition, QgsProcessingFeedback,
                        QgsProject, QgsRasterLayer, QgsReferencedGeometry,
-                       QgsRendererCategory, QgsSettings, QgsVectorLayer)
+                       QgsSettings, QgsVectorLayer)
 from qgis.gui import QgsFileWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
 from qgis.PyQt.QtCore import QUrl, pyqtSignal
 from qgis.PyQt.QtGui import QDesktopServices
@@ -21,10 +23,13 @@ from qgis.PyQt.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog,
                                  QLabel, QPlainTextEdit, QProgressBar, QPushButton,
                                  QRadioButton, QVBoxLayout)
 
+from . import stil
 from .algoritm import SKALOR, UTGAVOR
 from .rita import RitaYta
 
 ALG = "lmeko:hamta_ekonomiska_kartan"
+ALG_BLADRUTNAT = "lmeko:bladrutnat"
+ALG_FAST = "lmeko:fast_rutnat"
 NYCKEL = "lm_ekokarta/"
 
 
@@ -61,6 +66,9 @@ class HamtaDialog(QDialog):
         self.uppgift = None
         self.context = None
         self.aterkoppling = None
+        self.r_uppgift = None          # bladrutnatet, en egen uppgift
+        self.r_context = None
+        self.r_aterkoppling = None
         self.utmapp_senast = ""
         s = QgsSettings()
 
@@ -76,8 +84,11 @@ class HamtaDialog(QDialog):
         self.r_karta = QRadioButton("Kartfönstrets utbredning")
         self.r_lager = QRadioButton("Polygonlager")
         self.r_rita = QRadioButton("Rita i kartan")
+        self.r_rutnat = QRadioButton("Rutor ur ett rutnät")
+        self.r_rutnat.setToolTip("Ett bladrutnät eller ett fast rutnät, med alla eller "
+                                 "bara markerade rutor.")
         self.knappar = QButtonGroup(self)
-        for i, rb in enumerate((self.r_karta, self.r_lager, self.r_rita)):
+        for i, rb in enumerate((self.r_karta, self.r_lager, self.r_rita, self.r_rutnat)):
             self.knappar.addButton(rb, i)
         self.r_karta.setChecked(True)
         gl.addWidget(self.r_karta)
@@ -98,6 +109,56 @@ class HamtaDialog(QDialog):
         self.l_rita = QLabel("ingen yta ritad")
         rad.addWidget(self.l_rita, 1)
         gl.addLayout(rad)
+
+        rad = QHBoxLayout()
+        rad.addWidget(self.r_rutnat)
+        self.rutlager = QgsMapLayerComboBox()
+        self.rutlager.setFilters(Qgis.LayerFilter.PolygonLayer)
+        self.rutlager.setToolTip("Bladrutnätet, ett fast rutnät eller ett annat lager med "
+                                 "rutor. Rutnamnet tas ur fältet ruta eller blad.")
+        rad.addWidget(self.rutlager, 1)
+        self.bara_markerade_rutor = QCheckBox("Bara markerade rutor")
+        self.bara_markerade_rutor.setChecked(True)
+        rad.addWidget(self.bara_markerade_rutor)
+        gl.addLayout(rad)
+        rad = QHBoxLayout()
+        rad.addSpacing(24)
+        self.k_bladrutnat = QPushButton("Bygg bladrutnät")
+        self.k_bladrutnat.setToolTip(
+            "Bladrutorna för båda skalorna ur Lantmäteriets FTP-katalog, med år, antal "
+            "utgåvor och om bladet finns i arkivet. Listningen sparas med datum.")
+        self.k_bladrutnat.clicked.connect(self._bladrutnat)
+        rad.addWidget(self.k_bladrutnat)
+        self.lista_om = QCheckBox("lista FTP:n på nytt")
+        self.lista_om.setToolTip("Annars används den sparade listningen. En ny listning tar "
+                                 "omkring en minut.")
+        rad.addWidget(self.lista_om)
+        self.k_fast = QPushButton("Skapa fast rutnät…")
+        self.k_fast.setToolTip("Rutor i SWEREF 99 TM med jämna koordinater, t.ex. 1, 2,5, "
+                               "5 eller 10 km.")
+        self.k_fast.clicked.connect(self._fast_rutnat)
+        rad.addWidget(self.k_fast)
+        rad.addStretch(1)
+        gl.addLayout(rad)
+        rad = QHBoxLayout()
+        rad.addSpacing(24)
+        self.brickor = QCheckBox("En GeoTIFF per ruta (brickor), pixelstorlek")
+        self.brickor.setToolTip(
+            "Varje ruta skärs ut ur mosaiken som en egen GeoTIFF i brickor/, med samma "
+            "pixelstorlek och pixelrutnät i alla rutor. Rutor utan kartdata hoppas över.")
+        self.brickor.setChecked(s.value(NYCKEL + "brickor", False, type=bool))
+        rad.addWidget(self.brickor)
+        self.brickpixel = QDoubleSpinBox()
+        self.brickpixel.setRange(0.1, 100.0)
+        self.brickpixel.setDecimals(1)
+        self.brickpixel.setSuffix(" m")
+        self.brickpixel.setValue(float(s.value(NYCKEL + "brickpixel", 1.0)))
+        rad.addWidget(self.brickpixel)
+        rad.addStretch(1)
+        gl.addLayout(rad)
+        self.r_rutnat.toggled.connect(self._rutnat_val)
+        self.brickor.toggled.connect(self._rutnat_val)
+        self._rutnat_val()
         lay.addWidget(g)
 
         # --- Val ---
@@ -191,6 +252,81 @@ class HamtaDialog(QDialog):
         self.show()
         self.raise_()
 
+    # --- Rutnat -----------------------------------------------------------------
+    def _rutnat_val(self, *_):
+        pa = self.r_rutnat.isChecked()
+        self.brickor.setEnabled(pa)
+        self.brickpixel.setEnabled(pa and self.brickor.isChecked())
+
+    def _bladrutnat_fil(self) -> str:
+        arkiv = self.arkiv.filePath().strip()
+        if arkiv:
+            return os.path.join(arkiv, "ekonomiska_kartan", "bladrutnat.gpkg")
+        utmapp = self.utmapp.filePath().strip()
+        return os.path.join(utmapp, "bladrutnat.gpkg") if utmapp else ""
+
+    def _bladrutnat(self):
+        utfil = self._bladrutnat_fil()
+        if not utfil:
+            self.resultat.setText("Välj ett arkiv eller en utmapp för bladrutnätet.")
+            return
+        alg = QgsApplication.processingRegistry().createAlgorithmById(ALG_BLADRUTNAT)
+        if alg is None:
+            self.resultat.setText("Algoritmen är inte registrerad -- starta om QGIS.")
+            return
+        # Ett inlast bladrutnat haller filen oppen; det ersatts nar det nya ar klart.
+        prj = QgsProject.instance()
+        gamla = [l.id() for l in prj.mapLayers().values()
+                 if os.path.normcase(os.path.abspath(l.source().split("|")[0]))
+                 == os.path.normcase(os.path.abspath(utfil))]
+        if gamla:
+            prj.removeMapLayers(gamla)
+        self._spara()
+        self.logg.appendPlainText("Bygger bladrutnätet" + (
+            ", listar FTP:n på nytt (omkring en minut)" if self.lista_om.isChecked() else ""))
+        self.r_context = QgsProcessingContext()
+        self.r_context.setProject(prj)
+        self.r_aterkoppling = _Aterkoppling()
+        self.r_aterkoppling.rad.connect(self.logg.appendPlainText)
+        p = {"ARKIV": self.arkiv.filePath().strip(), "LISTA_OM": self.lista_om.isChecked(),
+             "CRS": self.crs.crs(), "UTDATA": utfil}
+        self.r_uppgift = QgsProcessingAlgRunnerTask(alg, p, self.r_context, self.r_aterkoppling)
+        self.r_uppgift.executed.connect(self._bladrutnat_klar)
+        self.k_bladrutnat.setEnabled(False)
+        QgsApplication.taskManager().addTask(self.r_uppgift)
+
+    def _bladrutnat_klar(self, ok: bool, res: dict):
+        self.k_bladrutnat.setEnabled(True)
+        self.r_uppgift = None
+        if not ok or not res:
+            self.resultat.setText("Bladrutnätet gick inte att bygga -- se raderna ovan.")
+            return
+        v = QgsVectorLayer(res["BLADRUTNAT"], f"Bladrutnät, listat {res['LISTAD']}", "ogr")
+        if not v.isValid():
+            self.resultat.setText(f"Bladrutnätet gick inte att läsa: {res['BLADRUTNAT']}")
+            return
+        stil.bladrutnat(v)
+        QgsProject.instance().addMapLayer(v, False)
+        QgsProject.instance().layerTreeRoot().insertLayer(0, v)
+        self.rutlager.setLayer(v)
+        self.r_rutnat.setChecked(True)
+        self.resultat.setText(
+            f"Bladrutnätet: {int(res['RUTOR_10K'])} rutor i 1:10 000 och "
+            f"{int(res['BLAD_20K'])} blad i 1:20 000, listat {res['LISTAD']}. Markera "
+            "rutorna du vill ha i kartan och tryck Hämta.")
+
+    def _fast_rutnat(self):
+        import processing
+        res = processing.execAlgorithmDialog(ALG_FAST, {})
+        if res and res.get("RUTNAT"):
+            # Processing har lagt in lagret; valj det som omrade.
+            kalla = os.path.normcase(os.path.abspath(res["RUTNAT"].split("|")[0]))
+            for l in QgsProject.instance().mapLayers().values():
+                if os.path.normcase(os.path.abspath(l.source().split("|")[0])) == kalla:
+                    self.rutlager.setLayer(l)
+                    self.r_rutnat.setChecked(True)
+                    break
+
     # --- Kor -------------------------------------------------------------------
     def _parametrar(self) -> dict | None:
         p = {}
@@ -211,6 +347,20 @@ class HamtaDialog(QDialog):
                 p["LAGER"] = QgsProcessingFeatureSourceDefinition(lager.id(), True)
             else:
                 p["LAGER"] = lager.id()
+        elif self.r_rutnat.isChecked():
+            lager = self.rutlager.currentLayer()
+            if lager is None:
+                self.resultat.setText("Välj ett rutnät, eller bygg bladrutnätet först.")
+                return None
+            if self.bara_markerade_rutor.isChecked():
+                if not lager.selectedFeatureCount():
+                    self.resultat.setText("Inga rutor är markerade i rutnätet.")
+                    return None
+                p["LAGER"] = QgsProcessingFeatureSourceDefinition(lager.id(), True)
+            else:
+                p["LAGER"] = lager.id()
+            p["BRICKOR"] = self.brickor.isChecked()
+            p["BRICKPIXEL"] = self.brickpixel.value()
         else:
             if self.ritat is None:
                 self.resultat.setText("Rita en yta först.")
@@ -235,6 +385,8 @@ class HamtaDialog(QDialog):
         s.setValue(NYCKEL + "utmapp", self.utmapp.filePath())
         s.setValue(NYCKEL + "arkiv", self.arkiv.filePath())
         s.setValue(NYCKEL + "vrt", self.vrt.isChecked())
+        s.setValue(NYCKEL + "brickor", self.brickor.isChecked())
+        s.setValue(NYCKEL + "brickpixel", self.brickpixel.value())
 
     def _kor(self):
         p = self._parametrar()
@@ -279,7 +431,7 @@ class HamtaDialog(QDialog):
         if res.get("BLAD"):
             v = QgsVectorLayer(res["BLAD"], "Blad – källa och lägesfel", "ogr")
             if v.isValid():
-                _stil(v)
+                stil.blad(v)
                 QgsProject.instance().addMapLayer(v, False)
                 grupp.addLayer(v)
         if res.get("VRT_LAGER"):
@@ -291,24 +443,16 @@ class HamtaDialog(QDialog):
             f"{int(res.get('LEVERERADE', 0))} blad levererade, "
             f"{int(res.get('UTELAMNADE', 0))} utelämnade"
             + (f", tryckår {ar}" if ar else "")
+            + (f", {int(res['BRICKOR_SKRIVNA'])} brickor skrivna och "
+               f"{int(res['BRICKOR_TOMMA'])} rutor utan kartdata"
+               if res.get("BRICKOR_SKRIVNA") or res.get("BRICKOR_TOMMA") else "")
             + ". Orsaker och lägesfel per blad står i rapport.txt och i bladlagret.")
 
     def stang(self):
-        if self.aterkoppling is not None:
-            self.aterkoppling.cancel()
+        for a in (self.aterkoppling, self.r_aterkoppling):
+            if a is not None:
+                a.cancel()
         if self.verktyg is not None:
             self.iface.mapCanvas().unsetMapTool(self.verktyg)
             self.verktyg = None
         self.close()
-
-
-def _stil(lager: QgsVectorLayer) -> None:
-    """Bladrutorna som konturer, fargade efter utfall."""
-    kat = []
-    for varde, farg, text in (("levererat", "#2e7d32", "levererat"),
-                              ("utelämnat", "#c62828", "utelämnat (se orsak)"),
-                              ("saknas", "#757575", "ingen karta")):
-        sym = QgsFillSymbol.createSimple({"color": "0,0,0,0", "outline_color": farg,
-                                          "outline_width": "0.6"})
-        kat.append(QgsRendererCategory(varde, sym, text))
-    lager.setRenderer(QgsCategorizedSymbolRenderer("status", kat))

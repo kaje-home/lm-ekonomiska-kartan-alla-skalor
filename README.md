@@ -10,11 +10,11 @@ En zip-fil som installeras i QGIS, se Snabbstart här nedanför.
 
 1. **Installera.** Ladda ner zip-filen ovan. Öppna QGIS och välj **Insticksprogram → Hantera och installera insticksprogram…**, fliken **Installera från ZIP**. Peka på filen och tryck *Installera insticksprogram*.
 2. **Öppna.** Välj **Insticksprogram → Ekonomiska kartan → Hämta ekonomiska kartan…**, eller knappen med kartbladet i verktygsfältet.
-3. **Område.** Välj *Kartfönstrets utbredning*, ett *Polygonlager* (gärna bara markerade objekt) eller *Rita i kartan*.
+3. **Område.** Välj *Kartfönstrets utbredning*, ett *Polygonlager* (gärna bara markerade objekt), *Rita i kartan* eller *Rutor ur ett rutnät*: tryck *Bygg bladrutnät* och markera de blad du vill ha, eller skapa ett fast rutnät (se [Bladrutnät och fast rutnät](#bladrutnät-och-fast-rutnät)).
 4. **Utmapp.** Välj en tom mapp **utanför OneDrive**, till exempel `C:\Ekokartan\Uttag1`.
 5. **Hämta.** När det är klart ligger kartan och ett bladlager i en grupp överst i lagerlistan.
 
-Ingen inloggning behövs. Kräver QGIS 3.40 eller nyare (QGIS 4 går också). Provat i QGIS 3.44 och 4.2. Pluginet är experimentellt i version 0.1.
+Ingen inloggning behövs. Kräver QGIS 3.40 eller nyare (QGIS 4 går också). Provat i QGIS 3.44 och 4.2. Pluginet är experimentellt i version 0.2.
 
 ## Vad skiljer det här pluginet från andra
 
@@ -29,6 +29,8 @@ Det finns redan ett plugin, [Geodata: Ekonomiska kartan (Lantmäteriet)](https:/
 | Omprojicerat till SWEREF 99 TM (eller valfritt) | ja | nej (RT 90) |
 | VRT över hela området | ja | nej |
 | Rapport per blad: källa, år, metod, lägesfel | ja | – |
+| Bladrutnät för båda skalorna, med år och utgåvor | ja | nej |
+| Fast rutnät och en GeoTIFF per ruta (brickor) | ja | nej |
 | Processing-algoritm (batch, Model Designer) | ja | nej |
 
 Över stora delar av Jämtland, Härjedalen och Norrbottens och Västerbottens inland finns ekonomiska kartan **bara** i 1:20 000. Lantmäteriet levererar de bladen som skanningar av hela det tryckta arket, med marginal och teckenförklaring, utan världsfil och utan koordinater. Det här pluginet räknar ut var bladet ligger ur bladnamnet och georefererar det mot kartans eget tryckta kilometerrutnät.
@@ -44,6 +46,7 @@ I utmappen:
 | `ekonomiska_kartan_1965-1977.vrt` | alla blad i en mosaik, i ordning efter utgåvevalet |
 | `blad.gpkg` | bladrutorna med källa, år, metod och lägesfel per blad |
 | `rapport.txt` | samma sak som text, en rad per blad |
+| `brickor/N7082500_E520000.tif` | med *En GeoTIFF per ruta*: en bricka per ruta i rutnätet |
 
 **Varje blad klipps mot sin ruta och får ett alfaband.** Utanför bladrutan är bilden genomskinlig, så det blir inga vita eller svarta kanter, och grannblad täcker inte varandra. I SWEREF 99 TM är rutnätet vridet knappt en grad (omkring 0,7°) mot RT 90, så kilarna finns på varje blad.
 
@@ -56,6 +59,58 @@ I utmappen:
 **1:10 000-bladen från 1950-talet i Norrland kan vara nästan rena fotokartor**: flygbilden med lite tryckt kartinnehåll. Ett sådant blad kan vinna över ett yngre 1:20 000-blad med *Äldsta*, eller med *Nyaste* där inget yngre blad finns. Se tryckåret i bladlagret innan du klassar markslag (nedan).
 
 **Koordinatsystem.** Förvalt är SWEREF 99 TM (EPSG:3006). Väljer du RT 90 2,5 gon V (EPSG:3021), seriens eget system, omsamplas 1:10 000-bladen inte alls. Det är att föredra om du ska klassa pixlar efter färg (se nedan).
+
+## Bladrutnät och fast rutnät
+
+Två rutnät går att använda som område, med alla rutor eller bara de markerade. I dialogen heter valet *Rutor ur ett rutnät*. I Processing väljer du rutnätet som `LAGER` och kryssar i *Endast markerade objekt*.
+
+### Bladrutnät
+
+*Bygg bladrutnät* i dialogen, eller algoritmen `lmeko:bladrutnat`, gör ett GeoPackage med en ruta per blad i båda skalorna. Det blir omkring 11 600 rutor i 1:10 000 (5 km) och omkring 1 050 blad i 1:20 000 (10 km), hämtade ur Lantmäteriets FTP-katalog.
+
+| Fält | |
+|---|---|
+| `blad` | rutan (`16e2h`) eller 1:20 000-bladets katalog (`J141-16E2-3g-h77`) |
+| `serie`, `skala` | `1:10 000` / 10000 eller `1:20 000` / 20000 |
+| `ar`, `ar_aldsta`, `ar_alla` | nyaste och äldsta tryckår och alla utgåvor |
+| `utgavor` | antal utgåvor |
+| `cachad`, `cache` | om bladet finns i arkivet: *hämtat*, *georefererat (rutnät/kant)*, *vägrat* med orsaken, eller *nej* |
+| `listad` | listningens datum |
+
+Lagret får färg efter skala och tryckår. 1:10 000-rutorna fylls halvgenomskinligt efter årtionde, och 1:20 000-bladen ritas med streckad kontur i samma färger, så att de syns ovanpå. Rutor utan årtal är grå.
+
+**Listningen tar omkring en minut** och sparas med datum, i `ekonomiska_kartan/listning.json` i arkivet om du har ett, annars i QGIS-profilen. Nästa gång används den sparade listningen. Kryssa i *lista FTP:n på nytt* för att hämta en färsk. Datumet står i lagrets namn (*Bladrutnät, listat 2026-11-05*) och i fältet `listad`.
+
+**Markera bladen du vill ha och tryck Hämta.** Samma skal- och utgåveregler gäller som annars. Att markera ett 1:20 000-blad betyder alltså *det här området*, inte *det här bladet*: med *Automatiskt* och *Nyaste* kan det bli ett yngre 1:10 000-blad där ett sådant finns. Vill du ha just 1:20 000-bladet, välj *Bara 1:20 000*.
+
+### Fast rutnät
+
+*Skapa fast rutnät…* i dialogen, eller algoritmen `lmeko:fast_rutnat`, lägger kvadratiska rutor i SWEREF 99 TM över ett område. Rutstorleken väljer du i km, till exempel 1, 2,5, 5 eller 10.
+
+- **Hörnen ligger på jämna multipler av rutstorleken.** En ruta om 2,5 km börjar alltid på en multipel av 2 500 m. Två körningar över grannområden ger rutor som passar ihop, och samma ruta får samma namn varje gång.
+- **Rutnamnet är nedre vänstra hörnet i meter:** `N7082500_E520000`. Fälten är `ruta`, `minx`, `miny` och `storlek_m`.
+- Bara rutor som har yta gemensamt med området kommer med, inte de som bara nuddar det. Högst 200 000 rutor per körning.
+
+## Brickor för maskininlärning
+
+Med *En GeoTIFF per ruta* (`BRICKOR` i Processing) skärs varje ruta i områdeslagret ut ur mosaiken som en egen GeoTIFF i `brickor/`. Det ger färdiga brickor för den som tränar modeller, till exempel för att känna igen åker, ängslador, kolbottnar eller vägar i den gamla kartan.
+
+- **Samma pixelrutnät i alla brickor.** Alla brickor får samma pixelstorlek, och hörnen ligger på jämna multipler av den. Med ett fast rutnät i bladens koordinatsystem (förvalet SWEREF 99 TM) är varje bricka exakt sin ruta: 2,5 km med 1 m pixlar blir 2 500 × 2 500 pixlar. Brickor från olika körningar passar ihop pixel för pixel.
+- **Brickan heter som rutan** (fältet `ruta`, annars `blad`). Med ett fast rutnät går det alltså att lägga till nya områden utan att döpa om något, och att dela upp i tränings- och provdata efter rutnamn.
+- **Fyra band: RGB och alfa.** Alfabandet är 0 där kartan saknas, till exempel utanför kartans täckning eller i en bladruta från bladrutnätet, som är vriden i SWEREF. Använd det som mask.
+- **Pixelstorlek.** 1:10 000-bladen har 1 m pixlar och 1:20 000-bladen 2 m. När brickan har samma pixelstorlek som mosaiken flyttas pixlarna utan att räknas om. Större pixlar medelvärdesbildas och mindre interpoleras bilinjärt. Ta 2 m där bara 1:20 000 finns, så slipper du uppsamplade pixlar.
+- **Rutor utan kartdata hoppas över** och räknas upp i `rapport.txt`. Brickor som delvis saknar karta skrivs, och rapporten anger hur stor del som är karta. Samma sak finns per bricka i lagret `brickor` i `blad.gpkg`, med fälten `ruta`, `status`, `andel_karta` och `fil`. Filtrera till exempel bort brickor under 0,9.
+- **En ruta i taget.** Brickorna skärs ut ur VRT:n en i taget, och GDAL läser bara den del av bladen som brickan behöver. Hela mosaiken ligger aldrig i minnet, och ett uttag med tusentals rutor tar inte mer minne än ett med en. Prov: 741 brickor om 1 km med 1 m pixlar över åtta 1:20 000-blad kring Sveg tog drygt sex minuter, och minnet växte med omkring 50 MB.
+
+Tänk på detta innan du tränar:
+
+- **Bladen är från olika år och skalor.** Tryckåret och skalan per blad står i bladlagret. Lägg in dem i träningsdatan, eller håll dig till ett årtionde och en skala.
+- **1950-talets 1:10 000-blad i Norrland kan vara nästan rena fotokartor** (se ovan). De ser helt annorlunda ut än de yngre bladen.
+- **Färgerna skiljer** mellan tryckningar och skanningar. Normalisera per blad, inte per bricka.
+- **Lägesfelet** i georefereringen är för 1:20 000 några meter, upp till omkring 8 m (se rapporten per blad), och för 1:10 000 omätt. Märkdata från dagens kartor kan ligga några pixlar fel mot brickan.
+- **Data är CC0** och kan användas fritt, också för träning.
+
+Brickorna fungerar med vilket polygonlager som helst som område. Varje objekt blir då en bricka över sin utbredning.
 
 ## Hur 1:20 000-bladen georefereras
 
@@ -82,25 +137,41 @@ Tänk på årtalen: ett uttag över ett större område blandar ofta blad från 
 
 ## Processing, batch och Model Designer
 
-Algoritmen heter `lmeko:hamta_ekonomiska_kartan` och finns i verktygslådan under *LM Ekonomiska kartan*. Dialogen fyller bara i den.
+Algoritmerna finns i verktygslådan under *LM Ekonomiska kartan*:
+
+- `lmeko:hamta_ekonomiska_kartan` hämtar kartan. Dialogen fyller bara i den.
+- `lmeko:bladrutnat` bygger bladrutnätet. Parametrarna är `ARKIV`, `LISTA_OM`, `CRS` och `UTDATA` (.gpkg).
+- `lmeko:fast_rutnat` lägger ut ett fast rutnät. Parametrarna är `LAGER` eller `UTBREDNING`, `STORLEK` (km) och `UTDATA` (.gpkg).
+
+Parametrar till `lmeko:hamta_ekonomiska_kartan`:
 
 | Parameter | |
 |---|---|
-| `LAGER`, `UTBREDNING`, `GEOMETRI` | området; minst ett, flera förenas |
+| `LAGER`, `UTBREDNING`, `GEOMETRI` | området; minst ett, flera förenas. Ett rutnät som `LAGER`, med *Endast markerade objekt* om du vill |
 | `BUFFERT` | meter runt området |
 | `SKALA` | 0 automatiskt, 1 bara 1:10 000, 2 bara 1:20 000, 3 båda |
 | `UTGAVA` | 0 nyaste, 1 äldsta, 2 alla |
 | `CRS` | bladens koordinatsystem, förval EPSG:3006 |
 | `ARKIV` | valfri mapp där nedladdade och georefererade blad sparas |
 | `VRT` | bygg VRT |
+| `BRICKOR` | en GeoTIFF per objekt i `LAGER` (brickor) |
+| `BRICKPIXEL` | brickornas pixelstorlek i meter, förval 1 |
 | `UTMAPP` | utmappen |
 
-Utdata: `VRT_LAGER`, `BLAD` (bladlagret), `RAPPORT`, `LEVERERADE`, `UTELAMNADE` och `AR` (tryckåren). Kör den i batch för flera områden till var sin utmapp, gärna med samma arkiv.
+Utdata: `VRT_LAGER`, `BLAD` (bladlagret), `RAPPORT`, `LEVERERADE`, `UTELAMNADE`, `AR` (tryckåren), `BRICKOR_SKRIVNA` och `BRICKOR_TOMMA`. Kör den i batch för flera områden till var sin utmapp, gärna med samma arkiv.
 
 ```python
 processing.run("lmeko:hamta_ekonomiska_kartan", {
     "UTBREDNING": "1440000,1450000,6960000,6975000 [EPSG:3021]",
     "UTMAPP": r"C:\Ekokartan\Uttag1", "ARKIV": r"C:\Ekokartan\Arkiv"})
+
+# Brickor om 2,5 km med 2 m pixlar över ett område
+r = processing.run("lmeko:fast_rutnat", {
+    "UTBREDNING": "515000,530000,7075000,7090000 [EPSG:3006]", "STORLEK": 2.5,
+    "UTDATA": r"C:\Ekokartan\rutnat_2_5km.gpkg"})
+processing.run("lmeko:hamta_ekonomiska_kartan", {
+    "LAGER": r["UTDATA"], "BRICKOR": True, "BRICKPIXEL": 2.0, "VRT": False,
+    "UTMAPP": r"C:\Ekokartan\Brickor1", "ARKIV": r"C:\Ekokartan\Arkiv"})
 ```
 
 ## Arkiv
@@ -120,6 +191,7 @@ Georefereringen ger samma svar varje gång, så ett blad som redan provats prova
 - **Några udda skanningsformat** i 1:20 000-serien är inte provade.
 - **Ihoptryckta 1:10 000-blad.** Enligt en genomgång i 1:10 000-pluginet ovan är omkring 190 utgåvor skannade större än sin ruta, och Lantmäteriets världsfil trycker ihop hela skanningen till rutan. De bladen ligger fel och lämnas utanför, med orsaken. De finns ofta i en annan utgåva.
 - **1:10 000-bladens läge mäts inte.** De använder Lantmäteriets världsfil som den är, granskad men inte mätt.
+- **16 filnamn i 1:10 000-serien går inte att tolka**, av omkring 12 000. 14 saknar årtal (t.ex. `133_11j1j`), och två av dem ligger dessutom i fel blockkatalog. 2 är sammanslagna blad (`133_3c0a-b71`). De kommer inte med, varken i bladrutnätet eller i uttaget.
 - **Ljus kantlinje i skarvar.** Där ett blad ligger ett par meter fel kan bladets egen kant synas som en ljus linje, 1–2 pixlar bred, mot grannbladet. Det syns mest på blad som georefererats mot kilometerstrecken i marginalen.
 - **Kartan är inte rikstäckande.** Delar av landet, framför allt fjällen, saknas i båda serierna. En ruta utan karta står i bladlagret som *saknas*.
 - **FTP och proxy.** Bladen hämtas med anonym FTP, och QGIS proxyinställningar följer inte med. Bakom en brandvägg som stänger FTP går det inte.

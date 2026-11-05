@@ -48,6 +48,8 @@ class Sammanfattning:
     fel: list[str] = field(default_factory=list)
     vrt: str = ""
     overlapp: list[str] = field(default_factory=list)   # rutor med bada skalorna
+    brickor: list = field(default_factory=list)         # brickor.Bricka
+    brick_pixel: float = 0.0
 
     @property
     def ar(self) -> list[int]:
@@ -66,6 +68,10 @@ _FALT = [("blad", ogr.OFTString), ("serie", ogr.OFTString), ("ar", ogr.OFTIntege
          ("streck", ogr.OFTInteger), ("kors", ogr.OFTInteger),
          ("loo_medel_m", ogr.OFTReal), ("loo_p95_m", ogr.OFTReal),
          ("anm", ogr.OFTString), ("kalla", ogr.OFTString), ("fil", ogr.OFTString)]
+
+
+_BRICKFALT = [("ruta", ogr.OFTString), ("status", ogr.OFTString),
+              ("andel_karta", ogr.OFTReal), ("fil", ogr.OFTString)]
 
 
 def skriv_gpkg(s: Sammanfattning, utfil: str) -> str:
@@ -102,6 +108,23 @@ def skriv_gpkg(s: Sammanfattning, utfil: str) -> str:
         g.Transform(ct)
         f.SetGeometry(g)
         lager.CreateFeature(f)
+    if s.brickor:
+        # Brickorna ar redan i malets koordinatsystem.
+        bl = ds.CreateLayer("brickor", mal, ogr.wkbPolygon)
+        for namn, typ in _BRICKFALT:
+            bl.CreateField(ogr.FieldDefn(namn, typ))
+        for b in s.brickor:
+            f = ogr.Feature(bl.GetLayerDefn())
+            f.SetField("ruta", b.ruta)
+            f.SetField("status", b.status)
+            if b.andel_karta is not None:
+                f.SetField("andel_karta", round(b.andel_karta, 4))
+            if b.fil:
+                f.SetField("fil", b.fil)
+            minx, miny, maxx, maxy = b.utbredning
+            f.SetGeometry(ogr.CreateGeometryFromWkt(
+                f"POLYGON(({minx} {miny},{maxx} {miny},{maxx} {maxy},{minx} {maxy},{minx} {miny}))"))
+            bl.CreateFeature(f)
     ds = None
     if os.path.exists(utfil):
         os.remove(utfil)
@@ -145,6 +168,19 @@ def skriv_text(s: Sammanfattning, utfil: str) -> str:
     if s.overlapp:
         rader += ["Där skalorna överlappar (överst = det som syns i VRT:n):"]
         rader += [f"  {t}" for t in s.overlapp] + [""]
+    if s.brickor:
+        skrivna = [b for b in s.brickor if b.status == "skriven"]
+        tomma = [b for b in s.brickor if b.status != "skriven"]
+        delvis = [b for b in skrivna if (b.andel_karta or 0) < 0.9995]
+        rader.append(f"Brickor: {len(skrivna)} av {len(s.brickor)} rutor skrivna till brickor/, "
+                     f"{s.brick_pixel:g} m pixlar, hörnen på jämna multipler av pixelstorleken.")
+        if tomma:
+            rader.append(f"  Utan kartdata, hoppades över ({len(tomma)}): "
+                         + ", ".join(b.ruta for b in tomma))
+        if delvis:
+            rader.append(f"  Delvis utan karta (alfabandet är maskning) ({len(delvis)}): "
+                         + ", ".join(f"{b.ruta} {100 * b.andel_karta:.0f} %" for b in delvis))
+        rader.append("")
     for r in sorted(s.rader, key=lambda r: (r.status != LEVERERAT, r.serie, r.blad, r.ar or 0)):
         rader.append(r.rad)
     tmp = halvfardig(utfil)

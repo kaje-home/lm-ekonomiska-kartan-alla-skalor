@@ -25,7 +25,8 @@ from qgis.core import (Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransfor
                        QgsProcessingParameterGeometry, QgsProcessingParameterNumber,
                        QgsRectangle)
 
-from . import rapport, uttag
+from . import brickor as brickmod
+from . import rapport, rutnat, stil, uttag
 from .lm_ekokarta_karna import blad_alla
 
 RT90 = "EPSG:3021"
@@ -46,6 +47,8 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
     ARKIV = "ARKIV"
     VRT = "VRT"
     UTMAPP = "UTMAPP"
+    BRICKOR = "BRICKOR"
+    BRICKPIXEL = "BRICKPIXEL"
 
     def name(self):
         return "hamta_ekonomiska_kartan"
@@ -82,6 +85,14 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
             "Rapporten (blad.gpkg och rapport.txt) säger per blad källa, metod och "
             "lägesfel i georefereringen. Lägesfelet gäller georefereringen, inte "
             "kartans innehåll.\n\n"
+            "Området kan också vara ett bladrutnät eller ett fast rutnät (de två "
+            "algoritmerna bredvid), med alla eller bara markerade rutor (Endast "
+            "markerade objekt). Rutor som bara nuddar området tas inte med.\n\n"
+            "Brickor: med En GeoTIFF per ruta skärs varje ruta i områdeslagret ut "
+            "ur mosaiken som en egen GeoTIFF i brickor/, i bladens koordinatsystem, "
+            "med samma pixelstorlek och pixelrutnät i alla rutor. Rutor utan "
+            "kartdata hoppas över och nämns i rapporten. Brickorna skärs en i "
+            "taget, så hela mosaiken ligger aldrig i minnet.\n\n"
             "Data: Lantmäteriet, öppna data, CC0. Ingen inloggning. Fristående "
             "tillägg, inte från Lantmäteriet.")
 
@@ -109,6 +120,11 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
             behavior=Qgis.ProcessingFileParameterBehavior.Folder, optional=True))
         self.addParameter(QgsProcessingParameterBoolean(
             self.VRT, "Bygg en VRT över hela området", defaultValue=True))
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.BRICKOR, "En GeoTIFF per ruta i områdeslagret (brickor)", defaultValue=False))
+        self.addParameter(QgsProcessingParameterNumber(
+            self.BRICKPIXEL, "Brickornas pixelstorlek (m)",
+            Qgis.ProcessingNumberParameterType.Double, defaultValue=1.0, minValue=0.1))
         self.addParameter(QgsProcessingParameterFolderDestination(
             self.UTMAPP, "Utmapp"))
         self.addOutput(QgsProcessingOutputRasterLayer("VRT_LAGER", "Ekonomiska kartan (VRT)"))
@@ -118,6 +134,8 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
         self.addOutput(QgsProcessingOutputNumber("LEVERERADE", "Levererade blad"))
         self.addOutput(QgsProcessingOutputNumber("UTELAMNADE", "Utelämnade blad"))
         self.addOutput(QgsProcessingOutputString("AR", "Tryckår"))
+        self.addOutput(QgsProcessingOutputNumber("BRICKOR_SKRIVNA", "Brickor skrivna"))
+        self.addOutput(QgsProcessingOutputNumber("BRICKOR_TOMMA", "Rutor utan kartdata"))
 
     # --- I huvudtraden: lagren lases har --------------------------------------
     def prepareAlgorithm(self, parameters, context, feedback):
@@ -125,16 +143,47 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
         delar: list[QgsGeometry] = []
         beskr: list[str] = []
 
+        crs = self.parameterAsCrs(parameters, self.CRS, context)
+        self._dst = crs.authid() if crs.authid().upper().startswith("EPSG:") else crs.toWkt()
+        self._crs_namn = crs.authid() or crs.description()
+        med_brickor = self.parameterAsBool(parameters, self.BRICKOR, context)
+        self._pixel = self.parameterAsDouble(parameters, self.BRICKPIXEL, context)
+        self._brickor: list[brickmod.Bricka] = []
+
         kalla = self.parameterAsSource(parameters, self.LAGER, context)
         if kalla is not None:
             ct = QgsCoordinateTransform(kalla.sourceCrs(), rt90, context.transformContext())
-            req = QgsFeatureRequest().setNoAttributes()
+            ct_ut = QgsCoordinateTransform(kalla.sourceCrs(), crs, context.transformContext())
+            falt = kalla.fields().names()
+            namnfalt = next((n for n in ("ruta", "blad") if n in falt), None)
+            req = QgsFeatureRequest()
+            if not med_brickor:
+                req.setNoAttributes()
             for f in kalla.getFeatures(req):
                 g = QgsGeometry(f.geometry())
-                if not g.isEmpty():
-                    g.transform(ct)
-                    delar.append(g)
+                if g.isEmpty():
+                    continue
+                if med_brickor:
+                    # Brickan ar rutans utbredning i bladens koordinatsystem,
+                    # utvidgad till hela pixlar pa ett gemensamt pixelrutnat.
+                    gu = QgsGeometry(g)
+                    gu.transform(ct_ut)
+                    bb = gu.boundingBox()
+                    namn = str(f[namnfalt]) if namnfalt and f[namnfalt] else f"ruta_{f.id()}"
+                    self._brickor.append(brickmod.Bricka(namn, brickmod.pa_pixelrutnat(
+                        bb.xMinimum(), bb.yMinimum(), bb.xMaximum(), bb.yMaximum(),
+                        self._pixel)))
+                g.transform(ct)
+                delar.append(g)
             beskr.append(f"lager {kalla.sourceName()}")
+        if med_brickor and not self._brickor:
+            raise QgsProcessingException(
+                "En GeoTIFF per ruta kräver ett områdeslager med rutor, t.ex. ett fast "
+                "rutnät eller ett bladrutnät.")
+        if len({b.ruta for b in self._brickor}) < len(self._brickor):
+            raise QgsProcessingException(
+                "Samma rutnamn (fältet ruta eller blad) finns mer än en gång i "
+                "områdeslagret, och brickorna skulle skriva över varandra.")
         if parameters.get(self.UTBREDNING):
             g = self.parameterAsExtentGeometry(parameters, self.UTBREDNING, context, rt90)
             if g and not g.isEmpty():
@@ -154,21 +203,23 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
             yta = yta.buffer(buffert, 8)
         bb = yta.boundingBox()
         # En ruta som bara nuddar ytan i en kant eller ett horn ar inte med,
-        # t.ex. hornrutan mellan tva ytor som foljer bladgranserna.
+        # t.ex. hornrutan mellan tva ytor som foljer bladgranserna, och inte
+        # heller en som bara far en flisa nar ett rutlager i SWEREF raknas om
+        # till RT 90 (rutnat.berors).
         self._rutor = []
+        yta_m2 = yta.area()
         for x, y in blad_alla.rutor(bb.xMinimum(), bb.yMinimum(), bb.xMaximum(), bb.yMaximum()):
             r = QgsGeometry.fromRect(QgsRectangle(x, y - 5000.0, x + 5000.0, y))
-            if yta.intersects(r) and not yta.touches(r):
+            if yta.intersects(r) and rutnat.berors(yta_m2, yta.intersection(r).area()):
                 self._rutor.append((x, y))
         if not self._rutor:
             raise QgsProcessingException("Området ligger utanför ekonomiska kartans rutnät.")
         km2 = yta.area() / 1e6
         self._omrade = (f"{' + '.join(beskr)}, {km2:.1f} km², "
                         f"{len(self._rutor)} rutor om 5 × 5 km"
-                        + (f", buffert {buffert:.0f} m" if buffert > 0 else ""))
-        crs = self.parameterAsCrs(parameters, self.CRS, context)
-        self._dst = crs.authid() if crs.authid().upper().startswith("EPSG:") else crs.toWkt()
-        self._crs_namn = crs.authid() or crs.description()
+                        + (f", buffert {buffert:.0f} m" if buffert > 0 else "")
+                        + (f", {len(self._brickor)} brickor om {self._pixel:g} m pixlar"
+                           if self._brickor else ""))
         return True
 
     # --- I arbetstraden: bara GDAL ---------------------------------------------
@@ -184,7 +235,7 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
                             avbruten=feedback.isCanceled)
         try:
             s = uttag.kor(self._rutor, utmapp, arkiv, self._dst, skala, utgava,
-                          med_vrt, self._omrade, r)
+                          med_vrt, self._omrade, r, self._brickor or None, self._pixel)
         except uttag.Avbrutet:
             return {}
         lev = [q for q in s.rader if q.status == rapport.LEVERERAT]
@@ -201,7 +252,15 @@ class HamtaEkonomiskaKartan(QgsProcessingAlgorithm):
                                            QgsProcessingContext.LayerDetails(
                                                "Ekonomiska kartan – blad", context.project(),
                                                "BLAD"))
+        context.layerToLoadOnCompletionDetails(blad + "|layername=blad").setPostProcessor(
+            stil.efter(stil.blad))
+        skrivna = sum(b.status == brickmod.SKRIVEN for b in s.brickor)
+        if s.brickor:
+            feedback.pushInfo(f"Brickor: {skrivna} skrivna till "
+                              f"{os.path.join(utmapp, uttag.BRICKMAPP)}, "
+                              f"{len(s.brickor) - skrivna} rutor utan kartdata")
         return {self.UTMAPP: utmapp, "VRT_LAGER": s.vrt or None,
                 "BLAD": blad + "|layername=blad",
                 "RAPPORT": os.path.join(utmapp, "rapport.txt"),
-                "LEVERERADE": len(lev), "UTELAMNADE": len(ut), "AR": ar}
+                "LEVERERADE": len(lev), "UTELAMNADE": len(ut), "AR": ar,
+                "BRICKOR_SKRIVNA": skrivna, "BRICKOR_TOMMA": len(s.brickor) - skrivna}

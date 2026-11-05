@@ -15,7 +15,8 @@ utan QGIS. Gangen:
 4. Varje levererat blad klipps mot sin ruta i malets koordinatsystem.
 5. VRT over alla, i samma ordning i alla lagen, aven "bada": det yngsta
    (eller aldsta) bladet overst, 1:10 000 vid samma ar.
-6. Bladlager och rapport, med ar, kalla, metod och lagesfel per blad, och
+6. Brickor, om de bestallts: en GeoTIFF per ruta ur mosaiken (brickor.py).
+7. Bladlager och rapport, med ar, kalla, metod och lagesfel per blad, och
    vilket blad som ligger overst dar skalorna overlappar.
 
 Arkivet har samma uppstallning som LM Faltunderlags, `<arkiv>/ekonomiska_kartan/`
@@ -30,6 +31,7 @@ import shutil
 from dataclasses import dataclass
 from typing import Callable
 
+from . import brickor as brickmod
 from . import klipp, rapport
 from .lm_ekokarta_karna import blad_alla, cache_20k, rutnat_20k
 from .lm_ekokarta_karna.blad import BLAD_20K_M
@@ -38,6 +40,7 @@ from .rapport import LEVERERAT, SAKNAS, UTELAMNAT, Bladrad, Sammanfattning
 
 ARKIVMAPP = "ekonomiska_kartan"
 MAPP_20K = "20k"
+BRICKMAPP = "brickor"
 SKALOR = ("auto", "10k", "20k", "bada")
 SKALA_TEXT = {"auto": "den skala vars blad passar utgåvevalet, 1:10 000 vid samma år",
               "10k": "bara 1:10 000", "20k": "bara 1:20 000",
@@ -70,8 +73,11 @@ def _kolla(r: Rapportor) -> None:
 
 def kor(rutor: list[tuple[float, float]], utmapp: str, arkiv: str, dst_crs: str,
         skala: str = "auto", utgava: str = "nyaste", vrt: bool = True,
-        omrade: str = "", r: Rapportor | None = None) -> Sammanfattning:
-    """`rutor`: 5 km-rutorna (minx, maxy i RT 90) som omradet tacker."""
+        omrade: str = "", r: Rapportor | None = None,
+        brickor: list[brickmod.Bricka] | None = None, brick_pixel: float = 1.0
+        ) -> Sammanfattning:
+    """`rutor`: 5 km-rutorna (minx, maxy i RT 90) som omradet tacker.
+    `brickor`: rutor (i `dst_crs`) att skara ut ur mosaiken, en GeoTIFF var."""
     r = r or Rapportor()
     if skala not in SKALOR:
         raise ValueError(f"skala ska vara en av {SKALOR}")
@@ -145,12 +151,29 @@ def kor(rutor: list[tuple[float, float]], utmapp: str, arkiv: str, dst_crs: str,
 
         # --- VRT och rapport -------------------------------------------------
         _kolla(r)
-        if vrt:
-            filer = _vrt_ordning(s.rader, utgava)
-            if filer:
-                r.steg("Bygger VRT")
-                namn = f"ekonomiska_kartan_{rapport.ar_text(s.ar)}.vrt"
-                s.vrt = klipp.bygg_vrt(filer, os.path.join(utmapp, namn))
+        filer = _vrt_ordning(s.rader, utgava)
+        if vrt and filer:
+            r.steg("Bygger VRT")
+            namn = f"ekonomiska_kartan_{rapport.ar_text(s.ar)}.vrt"
+            s.vrt = klipp.bygg_vrt(filer, os.path.join(utmapp, namn))
+
+        # --- Brickor ----------------------------------------------------------
+        if brickor:
+            # Brickorna skars ur en VRT aven nar ingen VRT ska levereras.
+            kalla = s.vrt or (klipp.bygg_vrt(filer, os.path.join(utmapp, "_brickor.vrt"))
+                              if filer else "")
+            if kalla:
+                r.steg(f"Skär ut {len(brickor)} brickor")
+                brickmod.skriv(kalla, filer, brickor, brick_pixel,
+                               os.path.join(utmapp, BRICKMAPP), r.steg,
+                               lambda p: r.framsteg(90 + 0.08 * p), r.avbruten)
+                if not s.vrt:
+                    os.remove(kalla)
+            else:
+                for b in brickor:
+                    b.status, b.andel_karta = brickmod.TOM, 0.0
+            s.brickor, s.brick_pixel = brickor, brick_pixel
+            _kolla(r)
         r.steg("Skriver rapporten")
         rapport.skriv_gpkg(s, os.path.join(utmapp, "blad.gpkg"))
         rapport.skriv_text(s, os.path.join(utmapp, "rapport.txt"))
